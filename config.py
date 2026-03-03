@@ -44,3 +44,46 @@ class Config:
     GMAIL_IMAP_HOST = "imap.gmail.com"
     GMAIL_SMTP_HOST = "smtp.gmail.com"
     GMAIL_SMTP_PORT = 587
+
+    # ── Multi-Language Support (Feature 5) ────────────────────────────────────
+    # Default language for TTS and (future) STT language hints.
+    # BCP-47 prefix codes: "en", "hi", "es", "fr", "de", "it", "pt", "ja", "zh"
+    # Change the env var VOICEMAIL_LANGUAGE in your .env file to switch language.
+    DEFAULT_LANGUAGE = os.getenv("VOICEMAIL_LANGUAGE", "en")
+
+    # All languages that the UI language-switcher will offer.
+    # Keys = BCP-47 prefix code, Values = human-readable display name.
+    SUPPORTED_LANGUAGES: dict = {
+        "en": "English",
+        "hi": "Hindi",
+        "mr": "Marathi",
+        "es": "Spanish",
+        "fr": "French",
+        "de": "German",
+        "it": "Italian",
+        "pt": "Portuguese",
+        "ja": "Japanese",
+        "zh": "Chinese",
+    }
+
+    # ── Messaging service ─────────────────────────────────────────────────────
+    # MESSAGING_BACKEND options:
+    #   "telethon"   - Telethon User API: send to ANYONE by @username / +phone (recommended)
+    #   "telegram"   - Bot API: recipients must message the bot first
+    #   "simulation" - No real network, offline demo
+    MESSAGING_BACKEND     = os.getenv("MESSAGING_BACKEND", "simulation")
+
+    # Telethon User API (get from https://my.telegram.org -> API Development Tools)
+    TELEGRAM_API_ID       = os.getenv("TELEGRAM_API_ID",   "")   # integer app id
+    TELEGRAM_API_HASH     = os.getenv("TELEGRAM_API_HASH",  "")   # 32-char hex string
+    TELEGRAM_PHONE        = os.getenv("TELEGRAM_PHONE",     "")   # e.g. +919876543210
+
+    # Bot API (kept for backward-compat / MESSAGING_BACKEND=telegram)
+    TELEGRAM_BOT_TOKEN    = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    # Comma-separated contact:chat_id pairs e.g. "Alice:123456789,Bob:987654321"
+    TELEGRAM_CHAT_IDS_RAW = os.getenv("TELEGRAM_CHAT_IDS",  "")
+
+    # ── Summarization (Feature 2) ─────────────────────────────────────────────
+    # "simple" uses the built-in rule-based summarizer (no extra dependencies).
+    # "transformers" uses HuggingFace — run: pip install transformers torch
+    SUMMARIZATION_MODE = os.getenv("SUMMARIZATION_MODE", "simple")  # "simple" | "transformers"

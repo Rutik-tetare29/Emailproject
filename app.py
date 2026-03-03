@@ -5,8 +5,30 @@ from flask_login import LoginManager, login_required, current_user, logout_user
 from config import Config
 from auth.google_auth import google_auth_bp, GoogleUser
 from auth.app_password_auth import apppass_auth_bp, AppPasswordUser
-from services.voice_processor import process_voice_command, process_text_compose_input
+from services.voice_processor import (
+    process_voice_command,
+    process_text_compose_input,
+    process_text_msg_input,
+)
 from services.email_service import fetch_emails, send_email
+
+# ── Milestone 3 service imports ───────────────────────────────────────────────
+from services.messaging_service import (
+    send_message as msg_send,
+    read_latest_message,
+    get_all_messages,
+    get_contacts,
+    get_telegram_status,
+    discover_contacts,
+    register_contact,
+    tl_auth_status,
+    tl_auth_start,
+    tl_auth_verify,
+    tl_list_contacts,
+)
+from services.summarizer import summarize_text, summarize_email, summarize_message
+from services.reply_engine import suggest_reply
+from services.voice_service import speak_confirmation, check_confirmation_answer, speak_text_lang
 
 # ── App factory ──────────────────────────────────────────────────────────────
 app = Flask(__name__)
@@ -525,9 +547,83 @@ def voice_process():
     if "audio" not in request.files:
         return jsonify({"error": "No audio file provided"}), 400
 
-    audio_file = request.files["audio"]
-    result = process_voice_command(audio_file, session)
+    # The browser always sends the current localStorage language in the form.
+    # Overwrite the session immediately — this is the authoritative source
+    # of truth and ensures STT + TTS both use the user's chosen language,
+    # even if the Flask session cookie was stale or expired.
+    lang_from_client = request.form.get("lang", "").strip().lower()
+    if lang_from_client and lang_from_client in Config.SUPPORTED_LANGUAGES:
+        session["language"] = lang_from_client
+        session.modified = True
+
+    audio_file       = request.files["audio"]
+    choosing_service = request.form.get("choosing_service") == "true"
+    result           = process_voice_command(audio_file, session, choosing_service=choosing_service)
     return jsonify(result)
+
+
+@app.route("/voice/service-greeting", methods=["GET"])
+@login_required
+def voice_service_greeting():
+    """
+    Returns TTS audio that asks the user to choose Email or Telegram.
+    Called by the frontend on the very first mic tap.
+    Spoken in the user's active session language.
+    """
+    from services.lang_utils import speak_multilang, translate_text, LANG_BCP47
+
+    # English master text
+    _text_en = (
+        "Welcome! Which service would you like? "
+        "Say Email for your inbox, or Telegram for chat messages."
+    )
+
+    # Per-language greeting (avoids round-trip translation for the common cases)
+    _greetings = {
+        "en": _text_en,
+        "hi": (
+            "स्वागत है! आप कौन सी सेवा चाहते हैं? "
+            "ईमेल इनबॉक्स के लिए 'ईमेल' कहें, या चैट के लिए 'टेलीग्राम' कहें।"
+        ),
+        "mr": (
+            "स्वागत आहे! तुम्हाला कोणती सेवा हवी आहे? "
+            "ईमेल इनबॉक्ससाठी 'ईमेल' म्हणा, किंवा चॅटसाठी 'टेलीग्राम' म्हणा."
+        ),
+        "es": (
+            "¡Bienvenido! ¿Qué servicio deseas? "
+            "Di 'Email' para tu bandeja, o 'Telegram' para los mensajes."
+        ),
+        "fr": (
+            "Bienvenue ! Quel service souhaitez-vous ? "
+            "Dites 'Email' pour votre boîte de réception, ou 'Telegram' pour les messages."
+        ),
+        "de": (
+            "Willkommen! Welchen Dienst möchten Sie? "
+            "Sagen Sie 'E-Mail' für Ihren Posteingang oder 'Telegram' für Nachrichten."
+        ),
+        "it": (
+            "Benvenuto! Quale servizio desideri? "
+            "Di' 'Email' per la posta in arrivo o 'Telegram' per i messaggi."
+        ),
+        "pt": (
+            "Bem-vindo! Qual serviço deseja? "
+            "Diga 'Email' para sua caixa de entrada ou 'Telegram' para mensagens."
+        ),
+    }
+
+    lang = session.get("language", "en")
+    # Look up the pre-written greeting; fall back to online translation
+    text = _greetings.get(lang)
+    if not text:
+        text = translate_text(_text_en, lang) or _text_en
+
+    tts_path  = speak_multilang(text, lang=lang)
+    audio_url = f"/static/audio/{os.path.basename(tts_path)}" if tts_path else None
+    return jsonify({
+        "audio_url":    audio_url,
+        "response_text": text,
+        "voice_lang":   lang,
+    })
 
 
 @app.route("/voice/compose-text", methods=["POST"])
@@ -544,6 +640,23 @@ def voice_compose_text():
     if not field or not value:
         return jsonify({"error": "Missing field or value"}), 400
     result = process_text_compose_input(field, value, session)
+    return jsonify(result)
+
+
+@app.route("/voice/msg-compose-text", methods=["POST"])
+@login_required
+def voice_msg_compose_text():
+    """
+    Accepts a typed field value for the active Telegram message compose step.
+    Body: { "field": "to" | "text" | "confirm", "value": "..." }
+    Returns the same JSON shape as /voice/process.
+    """
+    data  = request.get_json(force=True) or {}
+    field = data.get("field", "").strip()
+    value = data.get("value", "").strip()
+    if not field or not value:
+        return jsonify({"error": "Missing field or value"}), 400
+    result = process_text_msg_input(field, value, session)
     return jsonify(result)
 
 
@@ -584,6 +697,390 @@ def logout():
     logout_user()
     session.clear()
     return jsonify({"message": "Logged out"}), 200
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# MILESTONE 3 — New Feature Routes
+# ════════════════════════════════════════════════════════════════════════════════
+
+# ── Feature 1: Messaging ──────────────────────────────────────────────────────
+
+@app.route("/messages", methods=["GET"])
+@login_required
+def get_messages():
+    """
+    GET /messages?contact=<name>
+    Return all messages, optionally filtered by contact name.
+    """
+    contact = request.args.get("contact", None)
+    result  = get_all_messages(contact=contact)
+    return jsonify(result)
+
+
+@app.route("/messages/contacts", methods=["GET"])
+@login_required
+def list_contacts():
+    """GET /messages/contacts — Return a list of all known contacts."""
+    return jsonify({"contacts": get_contacts()})
+
+
+@app.route("/messages/send", methods=["POST"])
+@login_required
+def send_message_route():
+    """
+    POST /messages/send
+    JSON body: { "receiver": "Alice", "message": "Hello!" }
+    Returns:   { "success": bool, "message": str, "data": msg_dict }
+
+    The voice confirmation step is handled client-side:
+      1. Browser calls POST /confirm/start with the action text.
+      2. Server returns audio URL → browser plays it.
+      3. User speaks yes/no → browser records + POSTs to /confirm/answer.
+      4. Only on "yes" does the browser call this endpoint.
+    """
+    data     = request.get_json(force=True) or {}
+    receiver = data.get("receiver", "").strip()
+    message  = data.get("message", "").strip()
+
+    if not receiver or not message:
+        return jsonify({"success": False, "message": "receiver and message are required"}), 400
+
+    result = msg_send(receiver, message)
+    status = 200 if result["success"] else 400
+    return jsonify(result), status
+
+
+@app.route("/messages/latest", methods=["GET"])
+@login_required
+def latest_message():
+    """
+    GET /messages/latest?contact=<name>   (contact is optional)
+    Return the most recent message.
+    """
+    contact = request.args.get("contact", None)
+    result  = read_latest_message(contact=contact)
+    return jsonify(result)
+
+
+# ── Telegram management routes ────────────────────────────────────────────────
+
+@app.route("/telegram/status", methods=["GET"])
+@login_required
+def telegram_status():
+    """
+    GET /telegram/status
+    Returns bot info if TELEGRAM_BOT_TOKEN is valid, or simulation mode details.
+    """
+    return jsonify(get_telegram_status())
+
+
+@app.route("/telegram/discover", methods=["GET"])
+@login_required
+def telegram_discover():
+    """
+    GET /telegram/discover
+    Fetches Telegram getUpdates and auto-registers any contacts who have
+    already messaged your bot.  Call this after setting up your token.
+    Returns: { "contacts": {name: chat_id, ...}, "new_messages": int, "mode": str }
+    """
+    return jsonify(discover_contacts())
+
+
+@app.route("/telegram/register", methods=["POST"])
+@login_required
+def telegram_register():
+    """
+    POST /telegram/register
+    JSON body: { "name": "Alice", "chat_id": "123456789" }
+    Manually map a contact name to a Telegram chat_id so you can send them
+    messages even before they have messaged your bot.
+    """
+    data    = request.get_json(force=True) or {}
+    name    = data.get("name",    "").strip()
+    chat_id = data.get("chat_id", "").strip()
+    if not name or not chat_id:
+        return jsonify({"success": False, "message": "name and chat_id are required"}), 400
+    result = register_contact(name, chat_id)
+    return jsonify(result)
+
+
+# ── Telethon User API auth routes ─────────────────────────────────────────────
+
+@app.route("/telegram/my-contacts", methods=["GET"])
+@login_required
+def telegram_my_contacts():
+    """
+    GET /telegram/my-contacts
+    Returns all Telegram contacts from your account (phone-book + recent
+    conversations) so you know exactly what name to use when sending a message.
+    Example response:
+      { "contacts": [ { "name": "Vaibhav Ingle", "username": "@vai", ... } ] }
+    """
+    return jsonify(tl_list_contacts())
+
+
+@app.route("/telegram/auth/status", methods=["GET"])
+@login_required
+def telegram_auth_status():
+    """
+    GET /telegram/auth/status
+    Returns whether Telethon is configured and whether we are already
+    authenticated (session file exists). Authed = can send to anyone.
+    """
+    return jsonify(tl_auth_status())
+
+
+@app.route("/telegram/auth/start", methods=["POST"])
+@login_required
+def telegram_auth_start():
+    """
+    POST /telegram/auth/start
+    Sends an OTP to the TELEGRAM_PHONE number configured in .env.
+    Call this once; then verify with /telegram/auth/verify.
+    No body required.
+    """
+    result = tl_auth_start()
+    status = 200 if result.get("success") else 400
+    return jsonify(result), status
+
+
+@app.route("/telegram/auth/verify", methods=["POST"])
+@login_required
+def telegram_auth_verify():
+    """
+    POST /telegram/auth/verify
+    JSON body: { "code": "12345" }            (required)
+               { "password": "2FA_pass" }     (only if 2FA is enabled)
+    Completes Telethon authentication and saves the session file.
+    After this you can send messages to any Telegram user.
+    """
+    data     = request.get_json(force=True) or {}
+    code     = str(data.get("code",     "")).strip()
+    password = str(data.get("password", "")).strip()
+    if not code:
+        return jsonify({"success": False, "message": "code is required"}), 400
+    result = tl_auth_verify(code, password)
+    status = 200 if result.get("success") else 400
+    return jsonify(result), status
+
+
+# ── Feature 2: Summarization ──────────────────────────────────────────────────
+
+@app.route("/summarize", methods=["POST"])
+@login_required
+def summarize_route():
+    """
+    POST /summarize
+    JSON body: {
+        "text": "Long text here...",         # raw text  (option A)
+        "email": { email dict },             # email obj (option B)
+        "message": { message dict },         # msg obj   (option C)
+        "mode": "simple" | "transformers"    # optional, default "simple"
+    }
+    Returns: { "summary": str }
+    """
+    data = request.get_json(force=True) or {}
+    mode = data.get("mode", Config.SUMMARIZATION_MODE)
+
+    if "email" in data:
+        summary = summarize_email(data["email"], mode=mode)
+    elif "message" in data:
+        summary = summarize_message(data["message"], mode=mode)
+    elif "text" in data:
+        summary = summarize_text(data["text"], mode=mode)
+    else:
+        return jsonify({"error": "Provide 'text', 'email', or 'message' in request body"}), 400
+
+    return jsonify({"summary": summary})
+
+
+@app.route("/summarize/tts", methods=["POST"])
+@login_required
+def summarize_tts_route():
+    """
+    POST /summarize/tts
+    Same as /summarize, but also generates a TTS audio file for the summary.
+    Returns: { "summary": str, "audio_url": str }
+    """
+    data    = request.get_json(force=True) or {}
+    mode    = data.get("mode", Config.SUMMARIZATION_MODE)
+    lang    = data.get("lang", Config.DEFAULT_LANGUAGE)
+
+    if "email" in data:
+        summary = summarize_email(data["email"], mode=mode)
+    elif "message" in data:
+        summary = summarize_message(data["message"], mode=mode)
+    elif "text" in data:
+        summary = summarize_text(data["text"], mode=mode)
+    else:
+        return jsonify({"error": "Provide 'text', 'email', or 'message'"}), 400
+
+    out_path  = os.path.join(Config.UPLOAD_FOLDER, f"summary_{uuid.uuid4().hex}.wav")
+    speak_text_lang(summary, lang=lang, out_path=out_path)
+    audio_url = f"/static/audio/{os.path.basename(out_path)}"
+
+    return jsonify({"summary": summary, "audio_url": audio_url})
+
+
+# ── Feature 3: Suggested Replies ─────────────────────────────────────────────
+
+@app.route("/reply/suggest", methods=["POST"])
+@login_required
+def suggest_reply_route():
+    """
+    POST /reply/suggest
+    JSON body: { "message": "Can we meet tomorrow?" }
+    Returns:   { "category": str, "suggestions": [str, ...], "primary": str }
+    """
+    data    = request.get_json(force=True) or {}
+    message = data.get("message", "").strip()
+
+    if not message:
+        return jsonify({"error": "message field is required"}), 400
+
+    result = suggest_reply(message)
+    return jsonify(result)
+
+
+@app.route("/reply/suggest-tts", methods=["POST"])
+@login_required
+def suggest_reply_tts_route():
+    """
+    POST /reply/suggest-tts
+    Same as /reply/suggest but also returns a TTS audio URL for the primary
+    suggestion so the assistant can read it aloud.
+    JSON body: { "message": str, "lang": str (optional) }
+    Returns:   { ...suggest_reply fields..., "audio_url": str }
+    """
+    data    = request.get_json(force=True) or {}
+    message = data.get("message", "").strip()
+    lang    = data.get("lang", Config.DEFAULT_LANGUAGE)
+
+    if not message:
+        return jsonify({"error": "message field is required"}), 400
+
+    result   = suggest_reply(message)
+    primary  = result["primary"]
+    # Prepend a brief intro for natural TTS reading
+    spoken   = f"Suggested reply: {primary}"
+    out_path = os.path.join(Config.UPLOAD_FOLDER, f"reply_{uuid.uuid4().hex}.wav")
+    speak_text_lang(spoken, lang=lang, out_path=out_path)
+    result["audio_url"] = f"/static/audio/{os.path.basename(out_path)}"
+
+    return jsonify(result)
+
+
+# ── Feature 4: Voice Confirmation ─────────────────────────────────────────────
+
+@app.route("/confirm/start", methods=["POST"])
+@login_required
+def confirm_start():
+    """
+    POST /confirm/start
+    JSON body: { "action_text": "send a message to Alice: Hello!", "lang": "en" }
+
+    Step 1 of voice confirmation:
+      • Generates a TTS file that reads back the action and asks for yes/no.
+      • Returns { "audio_url": str } — browser automatically plays it.
+    """
+    data        = request.get_json(force=True) or {}
+    action_text = data.get("action_text", "").strip()
+    lang        = data.get("lang", Config.DEFAULT_LANGUAGE)
+
+    if not action_text:
+        return jsonify({"error": "action_text is required"}), 400
+
+    audio_url = speak_confirmation(action_text, lang=lang)
+    return jsonify({"audio_url": audio_url, "action_text": action_text})
+
+
+@app.route("/confirm/answer", methods=["POST"])
+@login_required
+def confirm_answer():
+    """
+    POST /confirm/answer
+    JSON body: { "transcription": "yes please" }
+
+    Step 2 of voice confirmation:
+      • Browser records the user's yes/no answer and sends the transcription.
+      • Returns { "confirmed": true/false }
+    """
+    data          = request.get_json(force=True) or {}
+    transcription = data.get("transcription", "").strip()
+
+    confirmed = check_confirmation_answer(transcription)
+    return jsonify({
+        "confirmed"   : confirmed,
+        "transcription": transcription,
+        "result"      : "confirmed" if confirmed else "cancelled",
+    })
+
+
+# ── Feature 5: Language API ────────────────────────────────────────────────────
+
+@app.route("/language", methods=["GET"])
+@login_required
+def get_language():
+    """GET /language — Return the current language and all supported languages."""
+    current_lang = session.get("language", Config.DEFAULT_LANGUAGE)
+    return jsonify({
+        "current"  : current_lang,
+        "languages": Config.SUPPORTED_LANGUAGES,
+    })
+
+
+@app.route("/language", methods=["POST"])
+@login_required
+def set_language():
+    """
+    POST /language
+    JSON body: { "lang": "hi" }
+    Switch the session language for TTS output.
+    Returns: { "lang": str, "name": str }
+    """
+    data = request.get_json(force=True) or {}
+    lang = data.get("lang", "en").strip().lower()
+
+    if lang not in Config.SUPPORTED_LANGUAGES:
+        return jsonify({
+            "error": f"Unsupported language '{lang}'. "
+                     f"Supported: {list(Config.SUPPORTED_LANGUAGES.keys())}"
+        }), 400
+
+    session["language"] = lang
+    session.modified = True   # force Flask to persist the session cookie
+    return jsonify({
+        "lang"   : lang,
+        "name"   : Config.SUPPORTED_LANGUAGES[lang],
+        "message": f"Language switched to {Config.SUPPORTED_LANGUAGES[lang]}.",
+    })
+
+
+@app.route("/language/tts-demo", methods=["POST"])
+@login_required
+def language_tts_demo():
+    """
+    POST /language/tts-demo
+    JSON body: { "lang": "hi" }
+    Generate a short TTS demo clip in the requested language using gTTS
+    for Hindi/Marathi or pyttsx3 for English.
+    Returns: { "audio_url": str }
+    """
+    from services.lang_utils import speak_multilang, LANG_NAMES
+    data = request.get_json(force=True) or {}
+    lang = data.get("lang", Config.DEFAULT_LANGUAGE).strip().lower()
+
+    # Demo texts in each supported language
+    _demo_texts = {
+        "en": "Hello! Voice assistant is now in English mode. You can say commands like read email, send email, or summarize email.",
+        "hi": "नमस्ते! वॉइस असिस्टेंट अब हिंदी मोड में है। आप रीड ईमेल, सेंड ईमेल जैसे कमांड दे सकते हैं।",
+        "mr": "नमस्कार! वॉइस असिस्टंट आता मराठी मोडमध्ये आहे. तुम्ही रीड ईमेल, सेंड ईमेल असे कमांड देऊ शकता.",
+    }
+    text     = _demo_texts.get(lang, f"Language switched to {LANG_NAMES.get(lang, lang)}.")
+    out_path = speak_multilang(text, lang=lang)
+    if not out_path:
+        return jsonify({"error": "TTS failed"}), 500
+    return jsonify({"audio_url": f"/static/audio/{os.path.basename(out_path)}"})
 
 
 if __name__ == "__main__":

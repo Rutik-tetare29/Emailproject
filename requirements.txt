@@ -2,6 +2,8 @@
 flask==3.0.3
 flask-login==0.6.3
 python-dotenv==1.0.1
+requests>=2.31.0
+telethon>=1.42.0
 
 # Speech — STT
 openai-whisper
@@ -18,3 +20,17 @@ google-api-python-client==2.131.0
 
 # Audio processing
 pyaudio==0.2.14
+
+# ── Milestone 4: Multi-language support ─────────────────────────────────────
+gTTS>=2.5.1          # Google TTS — Hindi / Marathi offline-free audio
+deep-translator>=1.11.4  # Google Translate wrapper — response translation
+
+# ── Milestone 3 additions ─────────────────────────────────────────────────────
+
+# Feature 2: Smart Text Summarization
+# Simple mode needs no extra packages (built-in only).
+# For transformer-based summarization (optional, ~1.6 GB model download):
+#   pip install transformers torch
+# Uncomment the lines below when you want HuggingFace summarization:
+# transformers>=4.40.0
+# torch>=2.2.0

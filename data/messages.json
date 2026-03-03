@@ -1,0 +1,27 @@
+{
+  "Alice": [
+    {
+      "id": "f1d37597119b46b48db056fb5450c4db",
+      "sender": "Alice",
+      "receiver": "me",
+      "text": "Hey! Can we reschedule our meeting to tomorrow?",
+      "timestamp": "2026-02-27T22:42:38"
+    },
+    {
+      "id": "4ed6dd58e99942e091858079c7739138",
+      "sender": "me",
+      "receiver": "Alice",
+      "text": "Sure, tomorrow works fine for me!",
+      "timestamp": "2026-02-27T22:42:38"
+    }
+  ],
+  "Bob": [
+    {
+      "id": "7fbf805455e644dbb5c9407a53a94d83",
+      "sender": "Bob",
+      "receiver": "me",
+      "text": "Thanks for the quick reply. Urgent: please share the report ASAP.",
+      "timestamp": "2026-02-27T22:42:38"
+    }
+  ]
+}

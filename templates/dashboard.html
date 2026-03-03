@@ -32,9 +32,22 @@
     <div class="flex items-center gap-2 text-xl font-extrabold">
       🎙️ <span class="text-purple-300">VoiceMail</span>
     </div>
-    <div class="flex items-center gap-4">
+    <div class="flex items-center gap-3 flex-wrap">
+      <!-- Language Switcher (Feature 5) -->
+      <select id="langSelect" onchange="switchLanguage(this.value)"
+        class="text-xs bg-white/10 border border-white/20 rounded-xl px-3 py-1.5
+               text-gray-200 focus:outline-none focus:border-purple-400 cursor-pointer">
+        <option value="en">🌐 English</option>
+        <option value="hi">🇮🇳 Hindi</option>
+        <option value="mr">🇮🇳 Marathi</option>
+        <option value="es">🇪🇸 Spanish</option>
+        <option value="fr">🇫🇷 French</option>
+        <option value="de">🇩🇪 German</option>
+        <option value="it">🇮🇹 Italian</option>
+        <option value="pt">🇵🇹 Portuguese</option>
+      </select>
       <span class="text-gray-300 text-sm">{{ user.email }}</span>
-      <button onclick="logoutUser()"
+      <button id="logoutBtnEl" onclick="logoutUser()"
         class="text-sm bg-white/10 hover:bg-white/20 px-4 py-2 rounded-xl transition">
         Logout
       </button>
@@ -76,18 +89,30 @@
           </button>
         </div>
 
+        <!-- Active service badge -->
+        <div class="flex flex-col items-center gap-1 mt-2">
+          <div id="serviceBadge"
+            class="px-3 py-1 rounded-full text-xs font-semibold bg-white/10 text-gray-400 text-center block">
+            🤖 Tap mic to start
+          </div>
+          <button id="switchServiceBtn" onclick="resetService()"
+            class="hidden text-xs text-gray-500 hover:text-gray-300 underline transition">
+            ↺ Switch service
+          </button>
+        </div>
+
         <!-- Status text -->
         <p id="statusText" class="text-center text-gray-400 text-sm mt-2">Ready to listen</p>
 
         <!-- Transcription box -->
         <div class="mt-4 bg-black/30 rounded-xl p-3 min-h-[48px]">
-          <span class="text-xs text-gray-500 block mb-1">You said:</span>
+          <span id="youSaidLabelEl" class="text-xs text-gray-500 block mb-1">You said:</span>
           <p id="transcriptionText" class="text-purple-200 text-sm font-medium">—</p>
         </div>
 
         <!-- Response box -->
         <div class="mt-3 bg-black/30 rounded-xl p-3 min-h-[48px]">
-          <span class="text-xs text-gray-500 block mb-1">Assistant:</span>
+          <span id="assistantLabelEl" class="text-xs text-gray-500 block mb-1">Assistant:</span>
           <p id="responseText" class="text-green-300 text-sm font-medium">—</p>
         </div>
 
@@ -110,12 +135,32 @@
             </button>
           </div>
         </div>
+
+        <!-- ── Type-in fallback for Telegram voice compose ── -->
+        <div id="msgTypeInBox" class="hidden mt-4 bg-white/5 border border-green-500/40 rounded-2xl p-4 space-y-3">
+          <p class="text-xs text-green-300 font-semibold">📱 Type Telegram value instead:</p>
+          <input id="msgTypeInInput" type="text"
+            class="w-full bg-white/10 border border-white/20 rounded-xl px-3 py-2 text-white
+                   placeholder-gray-500 focus:outline-none focus:border-green-400 text-sm"
+            placeholder="Contact name or message…" />
+          <div class="flex gap-2">
+            <button onclick="submitMsgTypeIn()"
+              class="flex-1 bg-gradient-to-r from-green-600 to-emerald-500 text-white text-sm
+                     font-bold py-2 rounded-xl hover:opacity-90 transition">
+              ✅ Use This
+            </button>
+            <button onclick="dismissMsgTypeIn()"
+              class="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-xl text-sm transition">
+              ✖
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- Quick commands hint -->
       <div class="glass rounded-3xl p-5">
-        <h3 class="text-sm font-bold text-gray-300 mb-3">💡 Try saying…</h3>
-        <ul class="space-y-2 text-sm text-gray-400">
+        <h3 id="trySayingTitle" class="text-sm font-bold text-gray-300 mb-3">💡 Try saying…</h3>
+        <ul id="tryCmdsList" class="space-y-2 text-sm text-gray-400">
           <li>🗣 "Read emails" &mdash; hear inbox summary</li>
           <li>➡️ "Next" &mdash; next email</li>
           <li>⬅️ "Previous" &mdash; previous email</li>
@@ -127,17 +172,43 @@
           <li>🚪 "Logout"</li>
           <li>❓ "Help"</li>
         </ul>
+        <div class="mt-4 pt-4 border-t border-white/10">
+          <p id="tgVoiceLabel" class="text-xs font-bold text-green-300 mb-2">📱 Telegram Voice</p>
+          <ul id="tgCmdsList" class="space-y-1 text-xs text-gray-400">
+            <li>📨 "Send message" — start voice compose</li>
+            <li>&nbsp;&nbsp;1️⃣ Say contact name (e.g. "Vaibhav")</li>
+            <li>&nbsp;&nbsp;2️⃣ Say "yes" to confirm · or say the correct name</li>
+            <li>&nbsp;&nbsp;3️⃣ Say your message text</li>
+            <li>&nbsp;&nbsp;4️⃣ "Yes" to send · "cancel" to abort</li>
+            <li>📋 "Read messages" — hear latest messages</li>
+          </ul>
+        </div>
       </div>
     </div>
 
-    <!-- ── RIGHT: Inbox + Compose ────────────────────────────────────────── -->
+    <!-- ── RIGHT: Tabs + Panels ──────────────────────────────────────────── -->
     <div class="lg:col-span-2 space-y-6">
+
+      <!-- Tab Bar -->
+      <div class="flex gap-2">
+        <button id="tabEmail" onclick="switchTab('email')"
+          class="tab-btn active-tab px-5 py-2 rounded-xl text-sm font-semibold transition">
+          📧 Email
+        </button>
+        <button id="tabMsg" onclick="switchTab('messages')"
+          class="tab-btn px-5 py-2 rounded-xl text-sm font-semibold transition bg-white/10 hover:bg-white/20">
+          💬 Messages
+        </button>
+      </div>
+
+      <!-- ═══ EMAIL PANEL ═══ -->
+      <div id="panelEmail">
 
       <!-- Inbox -->
       <div class="glass rounded-3xl p-6">
         <div class="flex justify-between items-center mb-5">
-          <h2 class="text-lg font-bold">📥 Inbox</h2>
-          <button onclick="loadEmails()"
+          <h2 id="inboxTitleEl" class="text-lg font-bold">📥 Inbox</h2>
+          <button id="refreshBtnEl" onclick="loadEmails()"
             class="text-sm bg-purple-600/40 hover:bg-purple-600/60 px-4 py-1.5 rounded-xl transition">
             Refresh
           </button>
@@ -147,38 +218,57 @@
         </div>
       </div>
 
+      <!-- Summarize Email Panel -->
+      <div id="emailSummaryBox" class="hidden glass rounded-3xl p-5">
+        <div class="flex justify-between items-center mb-3">
+          <h3 class="text-sm font-bold text-purple-300">📄 Email Summary</h3>
+          <button onclick="document.getElementById('emailSummaryBox').classList.add('hidden')"
+            class="text-gray-400 hover:text-white text-lg">✕</button>
+        </div>
+        <p id="emailSummaryText" class="text-gray-200 text-sm leading-relaxed"></p>
+        <button id="emailSummaryAudioBtn" onclick="playSummaryAudio('email')"
+          class="mt-3 px-4 py-1.5 bg-purple-600/50 hover:bg-purple-600 rounded-xl text-xs font-semibold transition">
+          🔊 Read Aloud
+        </button>
+      </div>
+
       <!-- Compose -->
       <div class="glass rounded-3xl p-6">
-        <h2 class="text-lg font-bold mb-5">✏️ Compose Email</h2>
+        <h2 id="composeTitleEl" class="text-lg font-bold mb-5">✏️ Compose Email</h2>
         <form id="composeForm" onsubmit="sendEmail(event)" class="space-y-4">
           <div>
-            <label class="block text-sm text-gray-400 mb-1">To</label>
+            <label id="fieldToLabel" class="block text-sm text-gray-400 mb-1">To</label>
             <input id="toAddr" type="email" required
               class="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white
                      placeholder-gray-500 focus:outline-none focus:border-purple-400 transition"
               placeholder="recipient@gmail.com" />
           </div>
           <div>
-            <label class="block text-sm text-gray-400 mb-1">Subject</label>
+            <label id="fieldSubjectLabel" class="block text-sm text-gray-400 mb-1">Subject</label>
             <input id="subject" type="text" required
               class="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white
                      placeholder-gray-500 focus:outline-none focus:border-purple-400 transition"
               placeholder="Subject" />
           </div>
           <div>
-            <label class="block text-sm text-gray-400 mb-1">Message</label>
+            <label id="fieldBodyLabel" class="block text-sm text-gray-400 mb-1">Message</label>
             <textarea id="body" rows="4" required
               class="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white
                      placeholder-gray-500 focus:outline-none focus:border-purple-400 transition resize-none"
               placeholder="Write your message…"></textarea>
           </div>
           <div class="flex gap-3">
-            <button type="submit"
+            <!-- Send via voice confirmation (Feature 4) -->
+            <button id="sendConfirmBtnEl" type="button" onclick="sendEmailWithConfirm()"
               class="flex-1 bg-gradient-to-r from-purple-600 to-pink-600 hover:opacity-90
                      font-bold py-3 rounded-xl transition-all hover:scale-105">
-              📤 Send Email
+              🔒 Send with Confirm
             </button>
-            <button type="button" onclick="clearCompose()"
+            <button id="sendBtnEl" type="submit"
+              class="px-5 py-3 bg-white/10 hover:bg-white/20 rounded-xl font-semibold transition">
+              📤 Send
+            </button>
+            <button id="clearBtnEl" type="button" onclick="clearCompose()"
               class="px-5 py-3 bg-white/10 hover:bg-white/20 rounded-xl transition">
               Clear
             </button>
@@ -186,10 +276,113 @@
         </form>
         <div id="sendStatus" class="hidden mt-3 text-center text-sm rounded-xl py-2 px-4"></div>
       </div>
+
+      </div><!-- end panelEmail -->
+
+      <!-- ═══ MESSAGES PANEL ═══ -->
+      <div id="panelMessages" class="hidden space-y-6">
+
+        <!-- Compose Message -->
+        <div class="glass rounded-3xl p-6">
+          <h2 id="sendMsgTitleEl" class="text-lg font-bold mb-5">💬 Send Message</h2>
+          <div class="space-y-3">
+            <div>
+              <label id="contactLabelEl" class="block text-sm text-gray-400 mb-1">To (Contact Name)</label>
+              <input id="msgReceiver" type="text"
+                class="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white
+                       placeholder-gray-500 focus:outline-none focus:border-purple-400 transition"
+                placeholder="e.g. Alice" list="contactsList" />
+              <datalist id="contactsList"></datalist>
+            </div>
+            <div>
+              <label id="messageLabelEl" class="block text-sm text-gray-400 mb-1">Message</label>
+              <textarea id="msgText" rows="3"
+                class="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white
+                       placeholder-gray-500 focus:outline-none focus:border-purple-400 transition resize-none"
+                placeholder="Type your message…"></textarea>
+            </div>
+            <!-- Suggested Replies -->
+            <div id="replyBox" class="hidden bg-white/5 border border-purple-500/30 rounded-2xl p-4">
+              <p class="text-xs text-purple-300 font-semibold mb-2">💡 Suggested Replies</p>
+              <div id="replyList" class="space-y-2"></div>
+            </div>
+            <div class="flex gap-3">
+              <button id="sendMsgConfirmBtnEl" onclick="sendMessageWithConfirm()"
+                class="flex-1 bg-gradient-to-r from-green-600 to-emerald-500 hover:opacity-90
+                       font-bold py-3 rounded-xl transition-all hover:scale-105">
+                🔒 Send with Confirm
+              </button>
+              <button id="suggestBtnEl" onclick="getSuggestReply()"
+                class="px-4 py-3 bg-purple-600/40 hover:bg-purple-600/70 rounded-xl text-sm font-semibold transition">
+                💡 Suggest Reply
+              </button>
+            </div>
+          </div>
+          <div id="msgSendStatus" class="hidden mt-3 text-center text-sm rounded-xl py-2 px-4"></div>
+        </div>
+
+        <!-- Message Inbox -->
+        <div class="glass rounded-3xl p-6">
+          <div class="flex justify-between items-center mb-5">
+            <h2 id="msgsTitleEl" class="text-lg font-bold">📨 Messages</h2>
+            <div class="flex gap-2">
+              <select id="msgContactFilter" onchange="loadMessages(this.value)"
+                class="text-xs bg-white/10 border border-white/20 rounded-xl px-3 py-1.5
+                       text-gray-300 focus:outline-none cursor-pointer">
+                <option value="">All Contacts</option>
+              </select>
+              <button onclick="loadMessages()"
+                class="text-sm bg-purple-600/40 hover:bg-purple-600/60 px-4 py-1.5 rounded-xl transition">
+                Refresh
+              </button>
+            </div>
+          </div>
+          <!-- Message Summary Box -->
+          <div id="msgSummaryBox" class="hidden mb-4 bg-white/5 border border-purple-500/30 rounded-2xl p-4">
+            <div class="flex justify-between items-center mb-2">
+              <p class="text-xs font-bold text-purple-300">📄 Message Summary</p>
+              <button onclick="document.getElementById('msgSummaryBox').classList.add('hidden')"
+                class="text-gray-400 hover:text-white">✕</button>
+            </div>
+            <p id="msgSummaryText" class="text-gray-200 text-sm"></p>
+            <button onclick="playSummaryAudio('message')" class="mt-2 px-3 py-1 bg-purple-600/50 hover:bg-purple-600 rounded-xl text-xs font-semibold">🔊 Read Aloud</button>
+          </div>
+          <div id="messageList" class="space-y-3">
+            <p class="text-gray-500 text-sm">Loading messages…</p>
+          </div>
+        </div>
+
+      </div><!-- end panelMessages -->
+
     </div>
   </div>
 
   <audio id="ttsAudio" class="hidden"></audio>
+
+  <!-- ── Voice Confirmation Modal (Feature 4) ──────────────────────────── -->
+  <div id="confirmModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4"
+       style="background:rgba(0,0,0,0.8)">
+    <div class="glass rounded-3xl w-full max-w-md p-8 space-y-5">
+      <h2 id="confirmModalTitle" class="text-xl font-bold text-center">🔒 Confirm Action</h2>
+      <p id="confirmActionText" class="text-gray-300 text-center text-sm leading-relaxed"></p>
+      <!-- TTS is auto-played; status shown below -->
+      <p id="confirmStatusMsg" class="text-yellow-300 text-xs text-center animate-pulse">🔊 Listen, then respond…</p>
+      <!-- Yes / No buttons (click OR voice) -->
+      <div class="flex gap-4">
+        <button id="confirmYesBtn" onclick="resolveConfirm(true)"
+          class="flex-1 bg-gradient-to-r from-green-600 to-emerald-500 hover:opacity-90
+                 font-bold py-3 rounded-xl transition">
+          ✅ Yes, Send
+        </button>
+        <button id="confirmNoBtn" onclick="resolveConfirm(false)"
+          class="flex-1 bg-gradient-to-r from-red-600 to-pink-600 hover:opacity-90
+                 font-bold py-3 rounded-xl transition">
+          ❌ Cancel
+        </button>
+      </div>
+      <p class="text-xs text-gray-500 text-center">You can also say "yes" or "no" using the mic 🎤</p>
+    </div>
+  </div>
 
   <!-- ── Email View Modal ────────────────────────────────────────────────── -->
   <div id="emailModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -210,11 +403,19 @@
         <pre id="modalBody"
           class="text-gray-200 text-sm leading-relaxed whitespace-pre-wrap font-sans"></pre>
       </div>
-      <!-- Reply shortcut -->
-      <div class="p-4 border-t border-white/10 flex gap-3">
+      <!-- Reply / Summarize shortcuts -->
+      <div class="p-4 border-t border-white/10 flex gap-3 flex-wrap">
         <button onclick="replyTo()"
           class="flex-1 bg-purple-600/50 hover:bg-purple-600 py-2 rounded-xl text-sm font-semibold transition">
           ↩ Reply
+        </button>
+        <button onclick="summarizeOpenEmail()"
+          class="px-4 py-2 bg-blue-700/50 hover:bg-blue-700 rounded-xl text-sm font-semibold transition">
+          📄 Summarize
+        </button>
+        <button onclick="suggestEmailReply()"
+          class="px-4 py-2 bg-green-700/50 hover:bg-green-700 rounded-xl text-sm font-semibold transition">
+          💡 Suggest Reply
         </button>
         <button onclick="document.getElementById('emailModal').classList.add('hidden')"
           class="px-5 py-2 bg-white/10 hover:bg-white/20 rounded-xl text-sm transition">
@@ -224,13 +425,717 @@
     </div>
   </div>
 
+  <style>
+    .active-tab { background: linear-gradient(135deg,#7c3aed,#db2777); color:#fff; }
+    .tab-btn { transition: all .2s; }
+  </style>
+
   <script src="/static/js/voice.js"></script>
   <script>
-    // Load inbox on page ready
-    let _emails = [];
-    document.addEventListener('DOMContentLoaded', loadEmails);
+    // ─────────────────────────────────────────────────────────────────────────
+    // GLOBALS
+    // ─────────────────────────────────────────────────────────────────────────
+    let _emails   = [];
+    let _messages = [];
 
-    // ── Email loader ──────────────────────────────────────────────────────────
+    // ── Language: read from localStorage SYNCHRONOUSLY so _currentLang is
+    //    always correct from the very first line of code, before any async
+    //    fetch completes.  localStorage survives page reloads, tab switches,
+    //    login/logout, and Flask session expiry.
+    const _LS_LANG_KEY = 'voicemail_lang';
+    let _currentLang = localStorage.getItem(_LS_LANG_KEY) || 'en';
+
+    // Apply the saved language to the <select> immediately (no flicker)
+    // This runs before DOMContentLoaded because the script is at the bottom
+    // of <body>, so the select element already exists in the DOM.
+    (function _applyStoredLang() {
+      const sel = document.getElementById('langSelect');
+      if (sel) sel.value = _currentLang;
+    })();
+
+    // Confirmation promise resolver (used by the confirm modal)
+    let _confirmResolve = null;
+
+    // Last opened email index (used by summarize / suggest reply in modal)
+    let _openEmailIdx = -1;
+
+    // Last summary audio URL
+    let _summaryAudioUrl = { email: null, message: null };
+
+    document.addEventListener('DOMContentLoaded', () => {
+      applyTranslations(_currentLang);   // apply stored language immediately
+      loadEmails();
+      _syncLangWithServer();
+      loadContacts();
+      loadMessages();
+    });
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // UI TRANSLATIONS (i18n)
+    // Each key maps to an object { elementId: "translated text" }.
+    // Add more languages / keys as needed.
+    // ─────────────────────────────────────────────────────────────────────────
+    const _I18N = {
+      en: {
+        statusReady:       "Ready to listen",
+        youSaid:           "You said:",
+        assistantLabel:    "Assistant:",
+        tabEmail:          "📧 Email",
+        tabMessages:       "💬 Messages",
+        inboxTitle:        "📥 Inbox",
+        refreshBtn:        "Refresh",
+        composeTitle:      "✏️ Compose Email",
+        fieldTo:           "To",
+        fieldSubject:      "Subject",
+        fieldMessage:      "Message",
+        sendConfirmBtn:    "🔒 Send with Confirm",
+        sendBtn:           "📤 Send",
+        clearBtn:          "Clear",
+        sendMsgTitle:      "💬 Send Message",
+        contactLabel:      "To (Contact Name)",
+        messageLabel:      "Message",
+        suggestBtn:        "💡 Suggest Reply",
+        sendMsgConfirmBtn: "🔒 Send with Confirm",
+        msgsTitle:         "📨 Messages",
+        allContacts:       "All Contacts",
+        tryTitle:          "💡 Try saying…",
+        tgVoiceLabel:      "📱 Telegram Voice",
+        tryCmds: [
+          '🗣 "Read emails" — hear inbox summary',
+          '➡️ "Next" — next email',
+          '⬅️ "Previous" — previous email',
+          '📚 "Read more" — continue long email',
+          '🔢 "Read email 2" — jump to email 2',
+          '✉️ "Send an email"',
+          '⏹ "Stop" — interrupt AI while reading',
+          '❌ "Cancel" — abort composing',
+          '🚪 "Logout"',
+          '❓ "Help"',
+        ],
+        tgCmds: [
+          '📨 "Send message" — start voice compose',
+          '\u00a0\u00a01️⃣ Say contact name (e.g. "Vaibhav")',
+          '\u00a0\u00a02️⃣ Say "yes" to confirm · or say the correct name',
+          '\u00a0\u00a03️⃣ Say your message text',
+          '\u00a0\u00a04️⃣ "Yes" to send · "cancel" to abort',
+          '📋 "Read messages" — hear latest messages',
+        ],
+        confirmTitle:      "🔒 Confirm Action",
+        confirmListen:     "🔊 Listen carefully, then click Yes or No.",
+        confirmYes:        "✅ Yes, Send",
+        confirmNo:         "❌ Cancel",
+        logoutBtn:         "Logout",
+        placeholderTo:     "recipient@gmail.com",
+        placeholderSub:    "Subject",
+        placeholderBody:   "Write your message…",
+        placeholderContact:"e.g. Alice",
+        placeholderMsg:    "Type your message…",
+        svcTapMic:         "🤖 Tap mic to start",
+        svcWaiting:        "Waiting for choice…",
+        svcEmail:          "📧 Email Mode",
+        svcTelegram:       "💬 Telegram Mode",
+        svcSwitch:         "↺ Switch service",
+        svcReset:          "Service reset. Tap the mic and say Email or Telegram.",
+      },
+      hi: {
+        statusReady:       "सुनने के लिए तैयार",
+        youSaid:           "आपने कहा:",
+        assistantLabel:    "सहायक:",
+        tabEmail:          "📧 ईमेल",
+        tabMessages:       "💬 संदेश",
+        inboxTitle:        "📥 इनबॉक्स",
+        refreshBtn:        "ताज़ा करें",
+        composeTitle:      "✏️ ईमेल लिखें",
+        fieldTo:           "प्रति",
+        fieldSubject:      "विषय",
+        fieldMessage:      "संदेश",
+        sendConfirmBtn:    "🔒 पुष्टि के साथ भेजें",
+        sendBtn:           "📤 भेजें",
+        clearBtn:          "साफ़ करें",
+        sendMsgTitle:      "💬 संदेश भेजें",
+        contactLabel:      "प्रति (संपर्क नाम)",
+        messageLabel:      "संदेश",
+        suggestBtn:        "💡 उत्तर सुझाएँ",
+        sendMsgConfirmBtn: "🔒 पुष्टि के साथ भेजें",
+        msgsTitle:         "📨 संदेश",
+        allContacts:       "सभी संपर्क",
+        tryTitle:          "💡 यह कहकर देखें…",
+        tgVoiceLabel:      "📱 टेलीग्राम वॉइस",
+        tryCmds: [
+          '🗣 "ईमेल पढ़ो" — इनबॉक्स सुनें',
+          '➡️ "अगला" — अगला ईमेल',
+          '⬅️ "पिछला" — पिछला ईमेल',
+          '📚 "और पढ़ो" — लंबा ईमेल जारी रखें',
+          '🔢 "ईमेल 2 पढ़ो" — ईमेल 2 पर जाएं',
+          '✉️ "ईमेल भेजो"',
+          '⏹ "रुको" — AI को बीच में रोकें',
+          '❌ "रद्द करो" — कॉम्पोज़ रद्द करें',
+          '🚪 "लॉगआउट"',
+          '❓ "मदद"',
+        ],
+        tgCmds: [
+          '📨 "संदेश भेजो" — वॉइस कॉम्पोज़ शुरू करें',
+          '\u00a0\u00a01️⃣ संपर्क का नाम बोलें (जैसे "Vaibhav")',
+          '\u00a0\u00a02️⃣ "हाँ" बोलें या सही नाम बोलें',
+          '\u00a0\u00a03️⃣ अपना संदेश बोलें',
+          '\u00a0\u00a04️⃣ "हाँ" भेजने के लिए · "रद्द करो" रद्द के लिए',
+          '📋 "संदेश पढ़ो" — नए संदेश सुनें',
+        ],
+        confirmTitle:      "🔒 कार्रवाई की पुष्टि करें",
+        confirmListen:     "🔊 ध्यान से सुनें, फिर हाँ या नहीं पर क्लिक करें।",
+        confirmYes:        "✅ हाँ, भेजें",
+        confirmNo:         "❌ रद्द करें",
+        logoutBtn:         "लॉग आउट",
+        placeholderTo:     "recipient@gmail.com",
+        placeholderSub:    "विषय लिखें",
+        placeholderBody:   "अपना संदेश लिखें…",
+        placeholderContact:"जैसे Alice",
+        placeholderMsg:    "अपना संदेश टाइप करें…",
+        svcTapMic:         "🤖 माइक टैप करें",
+        svcWaiting:        "प्रतीक्षा करें…",
+        svcEmail:          "📧 ईमेल मोड",
+        svcTelegram:       "💬 टेलीग्राम मोड",
+        svcSwitch:         "↺ सेवा बदलें",
+        svcReset:          "सेवा रीसेट। माइक टैप करें और 'ईमेल' या 'टेलीग्राम' कहें।",
+      },
+      mr: {
+        statusReady:       "ऐकण्यासाठी तयार",
+        youSaid:           "तुम्ही म्हणालात:",
+        assistantLabel:    "सहाय्यक:",
+        tabEmail:          "📧 ईमेल",
+        tabMessages:       "💬 संदेश",
+        inboxTitle:        "📥 इनबॉक्स",
+        refreshBtn:        "रिफ्रेश करा",
+        composeTitle:      "✏️ ईमेल लिहा",
+        fieldTo:           "कडे",
+        fieldSubject:      "विषय",
+        fieldMessage:      "संदेश",
+        sendConfirmBtn:    "🔒 पुष्टीसह पाठवा",
+        sendBtn:           "📤 पाठवा",
+        clearBtn:          "साफ करा",
+        sendMsgTitle:      "💬 संदेश पाठवा",
+        contactLabel:      "कडे (संपर्काचे नाव)",
+        messageLabel:      "संदेश",
+        suggestBtn:        "💡 उत्तर सुचवा",
+        sendMsgConfirmBtn: "🔒 पुष्टीसह पाठवा",
+        msgsTitle:         "📨 संदेश",
+        allContacts:       "सर्व संपर्क",
+        tryTitle:          "💡 असे म्हणून पाहा…",
+        tgVoiceLabel:      "📱 टेलीग्राम व्हॉइस",
+        tryCmds: [
+          '🗣 "ईमेल वाचा" — इनबॉक्स ऐका',
+          '➡️ "पुढील" — पुढील ईमेल',
+          '⬅️ "मागील" — मागील ईमेल',
+          '📚 "अजून वाचा" — मोठा ईमेल सुरू ठेवा',
+          '🔢 "ईमेल 2 वाचा" — ईमेल 2 वर जा',
+          '✉️ "ईमेल पाठवा"',
+          '⏹ "थांबा" — AI ला मध्येच थांबवा',
+          '❌ "रद्द करा" — कॉम्पोज़ रद्द करा',
+          '🚪 "लॉगआउट"',
+          '❓ "मदत"',
+        ],
+        tgCmds: [
+          '📨 "संदेश पाठवा" — व्हॉइस कॉम्पोज़ सुरू करा',
+          '\u00a0\u00a01️⃣ संपर्काचे नाव सांगा (उदा. "Vaibhav")',
+          '\u00a0\u00a02️⃣ "होय" म्हणा किंवा बरोबर नाव सांगा',
+          '\u00a0\u00a03️⃣ तुमचा संदेश सांगा',
+          '\u00a0\u00a04️⃣ "होय" पाठवण्यासाठी · "रद्द करा" रद्द करण्यासाठी',
+          '📋 "संदेश वाचा" — नवीन संदेश ऐका',
+        ],
+        confirmTitle:      "🔒 कृतीची पुष्टी करा",
+        confirmListen:     "🔊 नीट ऐका, मग हो किंवा नाही क्लिक करा.",
+        confirmYes:        "✅ होय, पाठवा",
+        confirmNo:         "❌ रद्द करा",
+        logoutBtn:         "बाहेर पडा",
+        placeholderTo:     "recipient@gmail.com",
+        placeholderSub:    "विषय लिहा",
+        placeholderBody:   "तुमचा संदेश लिहा…",
+        placeholderContact:"उदा. Alice",
+        placeholderMsg:    "तुमचा संदेश टाइप करा…",
+        svcTapMic:         "🤖 माइक टॅप करा",
+        svcWaiting:        "निवड करण्याची प्रतीक्षा…",
+        svcEmail:          "📧 ईमेल मोड",
+        svcTelegram:       "💬 टेलीग्राम मोड",
+        svcSwitch:         "↺ सेवा बदला",
+        svcReset:          "सेवा रीसेट. 'ईमेल' किंवा 'टेलीग्राम' म्हणण्यासाठी माइक टॅप करा.",
+      },
+      es: {
+        statusReady:       "Listo para escuchar",
+        youSaid:           "Dijiste:",
+        assistantLabel:    "Asistente:",
+        tabEmail:          "📧 Correo",
+        tabMessages:       "💬 Mensajes",
+        inboxTitle:        "📥 Bandeja de entrada",
+        refreshBtn:        "Actualizar",
+        composeTitle:      "✏️ Redactar correo",
+        fieldTo:           "Para",
+        fieldSubject:      "Asunto",
+        fieldMessage:      "Mensaje",
+        sendConfirmBtn:    "🔒 Enviar con confirmación",
+        sendBtn:           "📤 Enviar",
+        clearBtn:          "Limpiar",
+        sendMsgTitle:      "💬 Enviar mensaje",
+        contactLabel:      "Para (nombre del contacto)",
+        messageLabel:      "Mensaje",
+        suggestBtn:        "💡 Sugerir respuesta",
+        sendMsgConfirmBtn: "🔒 Enviar con confirmación",
+        msgsTitle:         "📨 Mensajes",
+        allContacts:       "Todos los contactos",
+        tryTitle:          "💡 Intenta decir…",
+        tgVoiceLabel:      "📱 Voz Telegram",
+        tryCmds: [
+          '🗣 "Leer correos" — escucha el resumen',
+          '➡️ "Siguiente" — siguiente correo',
+          '⬅️ "Anterior" — correo anterior',
+          '📚 "Leer más" — continuar correo largo',
+          '🔢 "Leer correo 2" — ir al correo 2',
+          '✉️ "Enviar correo"',
+          '⏹ "Parar" — interrumpir mientras lee',
+          '❌ "Cancelar" — abortar redacción',
+          '🚪 "Cerrar sesión"',
+          '❓ "Ayuda"',
+        ],
+        tgCmds: [
+          '📨 "Enviar mensaje" — iniciar redacción por voz',
+          '\u00a0\u00a01️⃣ Di el nombre del contacto (ej. "Vaibhav")',
+          '\u00a0\u00a02️⃣ Di "sí" para confirmar · o di el nombre correcto',
+          '\u00a0\u00a03️⃣ Di tu mensaje',
+          '\u00a0\u00a04️⃣ "Sí" para enviar · "cancelar" para abortar',
+          '📋 "Leer mensajes" — escucha los últimos mensajes',
+        ],
+        confirmTitle:      "🔒 Confirmar acción",
+        confirmListen:     "🔊 Escucha atentamente, luego haz clic en Sí o No.",
+        confirmYes:        "✅ Sí, Enviar",
+        confirmNo:         "❌ Cancelar",
+        logoutBtn:         "Cerrar sesión",
+        placeholderTo:     "destinatario@gmail.com",
+        placeholderSub:    "Asunto",
+        placeholderBody:   "Escribe tu mensaje…",
+        placeholderContact:"ej. Alice",
+        placeholderMsg:    "Escribe tu mensaje…",
+        svcTapMic:         "🤖 Toca el mic",
+        svcWaiting:        "Esperando elección…",
+        svcEmail:          "📧 Modo Email",
+        svcTelegram:       "💬 Modo Telegram",
+        svcSwitch:         "↺ Cambiar servicio",
+        svcReset:          "Servicio reiniciado. Toca el mic y di 'Email' o 'Telegram'.",
+      },
+      fr: {
+        statusReady:       "Prêt à écouter",
+        youSaid:           "Vous avez dit :",
+        assistantLabel:    "Assistant :",
+        tabEmail:          "📧 E-mail",
+        tabMessages:       "💬 Messages",
+        inboxTitle:        "📥 Boîte de réception",
+        refreshBtn:        "Actualiser",
+        composeTitle:      "✏️ Rédiger un e-mail",
+        fieldTo:           "À",
+        fieldSubject:      "Objet",
+        fieldMessage:      "Message",
+        sendConfirmBtn:    "🔒 Envoyer avec confirmation",
+        sendBtn:           "📤 Envoyer",
+        clearBtn:          "Effacer",
+        sendMsgTitle:      "💬 Envoyer un message",
+        contactLabel:      "À (nom du contact)",
+        messageLabel:      "Message",
+        suggestBtn:        "💡 Suggérer une réponse",
+        sendMsgConfirmBtn: "🔒 Envoyer avec confirmation",
+        msgsTitle:         "📨 Messages",
+        allContacts:       "Tous les contacts",
+        tryTitle:          "💡 Essayez de dire…",
+        tgVoiceLabel:      "📱 Voix Telegram",
+        tryCmds: [
+          '🗣 "Lire les e-mails" — résumé de la boîte',
+          '➡️ "Suivant" — e-mail suivant',
+          '⬅️ "Précédent" — e-mail précédent',
+          '📚 "Lire plus" — continuer un long e-mail',
+          '🔢 "Lire e-mail 2" — aller à l\'e-mail 2',
+          '✉️ "Envoyer un e-mail"',
+          '⏹ "Arrêter" — interrompre pendant la lecture',
+          '❌ "Annuler" — abandonner la rédaction',
+          '🚪 "Déconnexion"',
+          '❓ "Aide"',
+        ],
+        tgCmds: [
+          '📨 "Envoyer message" — démarrer la rédaction vocale',
+          '\u00a0\u00a01️⃣ Dites le nom du contact (ex. "Vaibhav")',
+          '\u00a0\u00a02️⃣ Dites "oui" pour confirmer · ou dites le bon nom',
+          '\u00a0\u00a03️⃣ Dites votre message',
+          '\u00a0\u00a04️⃣ "Oui" pour envoyer · "annuler" pour abandonner',
+          '📋 "Lire les messages" — écouter les derniers messages',
+        ],
+        confirmTitle:      "🔒 Confirmer l'action",
+        confirmListen:     "🔊 Écoutez attentivement, puis cliquez sur Oui ou Non.",
+        confirmYes:        "✅ Oui, Envoyer",
+        confirmNo:         "❌ Annuler",
+        logoutBtn:         "Déconnexion",
+        placeholderTo:     "destinataire@gmail.com",
+        placeholderSub:    "Objet",
+        placeholderBody:   "Rédigez votre message…",
+        placeholderContact:"ex. Alice",
+        placeholderMsg:    "Tapez votre message…",
+        svcTapMic:         "🤖 Appuyez sur le micro",
+        svcWaiting:        "En attente de choix…",
+        svcEmail:          "📧 Mode E-mail",
+        svcTelegram:       "💬 Mode Telegram",
+        svcSwitch:         "↺ Changer de service",
+        svcReset:          "Service réinitialisé. Dites 'Email' ou 'Telegram'.",
+      },
+      de: {
+        statusReady:       "Bereit zum Zuhören",
+        youSaid:           "Sie sagten:",
+        assistantLabel:    "Assistent:",
+        tabEmail:          "📧 E-Mail",
+        tabMessages:       "💬 Nachrichten",
+        inboxTitle:        "📥 Posteingang",
+        refreshBtn:        "Aktualisieren",
+        composeTitle:      "✏️ E-Mail verfassen",
+        fieldTo:           "An",
+        fieldSubject:      "Betreff",
+        fieldMessage:      "Nachricht",
+        sendConfirmBtn:    "🔒 Mit Bestätigung senden",
+        sendBtn:           "📤 Senden",
+        clearBtn:          "Leeren",
+        sendMsgTitle:      "💬 Nachricht senden",
+        contactLabel:      "An (Kontaktname)",
+        messageLabel:      "Nachricht",
+        suggestBtn:        "💡 Antwort vorschlagen",
+        sendMsgConfirmBtn: "🔒 Mit Bestätigung senden",
+        msgsTitle:         "📨 Nachrichten",
+        allContacts:       "Alle Kontakte",
+        tryTitle:          "💡 Versuchen Sie zu sagen…",
+        tgVoiceLabel:      "📱 Telegram-Stimme",
+        tryCmds: [
+          '🗣 "E-Mails lesen" — Posteingang hören',
+          '➡️ "Nächste" — nächste E-Mail',
+          '⬅️ "Vorherige" — vorherige E-Mail',
+          '📚 "Mehr lesen" — lange E-Mail fortsetzen',
+          '🔢 "E-Mail 2 lesen" — zu E-Mail 2 springen',
+          '✉️ "E-Mail senden"',
+          '⏹ "Stopp" — KI beim Lesen unterbrechen',
+          '❌ "Abbrechen" — Verfassen abbrechen',
+          '🚪 "Abmelden"',
+          '❓ "Hilfe"',
+        ],
+        tgCmds: [
+          '📨 "Nachricht senden" — Sprach-Verfassen starten',
+          '\u00a0\u00a01️⃣ Kontaktname sagen (z.B. "Vaibhav")',
+          '\u00a0\u00a02️⃣ "Ja" zur Bestätigung · oder den richtigen Namen sagen',
+          '\u00a0\u00a03️⃣ Nachrichtentext sprechen',
+          '\u00a0\u00a04️⃣ "Ja" zum Senden · "Abbrechen" zum Abbruch',
+          '📋 "Nachrichten lesen" — neueste Nachrichten hören',
+        ],
+        confirmTitle:      "🔒 Aktion bestätigen",
+        confirmListen:     "🔊 Hören Sie genau zu, dann klicken Sie Ja oder Nein.",
+        confirmYes:        "✅ Ja, Senden",
+        confirmNo:         "❌ Abbrechen",
+        logoutBtn:         "Abmelden",
+        placeholderTo:     "empfaenger@gmail.com",
+        placeholderSub:    "Betreff",
+        placeholderBody:   "Schreiben Sie Ihre Nachricht…",
+        placeholderContact:"z.B. Alice",
+        placeholderMsg:    "Nachricht eingeben…",
+        svcTapMic:         "🤖 Mikrofon tippen",
+        svcWaiting:        "Auf Auswahl warten…",
+        svcEmail:          "📧 E-Mail-Modus",
+        svcTelegram:       "💬 Telegram-Modus",
+        svcSwitch:         "↺ Dienst wechseln",
+        svcReset:          "Dienst zurückgesetzt. Sagen Sie 'E-Mail' oder 'Telegram'.",
+      },
+      it: {
+        statusReady:       "Pronto ad ascoltare",
+        youSaid:           "Hai detto:",
+        assistantLabel:    "Assistente:",
+        tabEmail:          "📧 Email",
+        tabMessages:       "💬 Messaggi",
+        inboxTitle:        "📥 Posta in arrivo",
+        refreshBtn:        "Aggiorna",
+        composeTitle:      "✏️ Componi email",
+        fieldTo:           "A",
+        fieldSubject:      "Oggetto",
+        fieldMessage:      "Messaggio",
+        sendConfirmBtn:    "🔒 Invia con conferma",
+        sendBtn:           "📤 Invia",
+        clearBtn:          "Cancella",
+        sendMsgTitle:      "💬 Invia messaggio",
+        contactLabel:      "A (nome contatto)",
+        messageLabel:      "Messaggio",
+        suggestBtn:        "💡 Suggerisci risposta",
+        sendMsgConfirmBtn: "🔒 Invia con conferma",
+        msgsTitle:         "📨 Messaggi",
+        allContacts:       "Tutti i contatti",
+        tryTitle:          "💡 Prova a dire…",
+        tgVoiceLabel:      "📱 Voce Telegram",
+        tryCmds: [
+          '🗣 "Leggi email" — ascolta il riepilogo',
+          '➡️ "Prossima" — prossima email',
+          '⬅️ "Precedente" — email precedente',
+          '📚 "Leggi di più" — continua email lunga',
+          '🔢 "Leggi email 2" — vai all\'email 2',
+          '✉️ "Invia email"',
+          '⏹ "Fermati" — interrompi durante la lettura',
+          '❌ "Annulla" — annulla composizione',
+          '🚪 "Disconnetti"',
+          '❓ "Aiuto"',
+        ],
+        tgCmds: [
+          '📨 "Invia messaggio" — inizia composizione vocale',
+          '\u00a0\u00a01️⃣ Di\' il nome del contatto (es. "Vaibhav")',
+          '\u00a0\u00a02️⃣ Di\' "sì" per confermare · o di\' il nome corretto',
+          '\u00a0\u00a03️⃣ Di\' il tuo messaggio',
+          '\u00a0\u00a04️⃣ "Sì" per inviare · "annulla" per interrompere',
+          '📋 "Leggi messaggi" — ascolta gli ultimi messaggi',
+        ],
+        confirmTitle:      "🔒 Conferma azione",
+        confirmListen:     "🔊 Ascolta attentamente, poi clicca Sì o No.",
+        confirmYes:        "✅ Sì, Invia",
+        confirmNo:         "❌ Annulla",
+        logoutBtn:         "Disconnetti",
+        placeholderTo:     "destinatario@gmail.com",
+        placeholderSub:    "Oggetto",
+        placeholderBody:   "Scrivi il tuo messaggio…",
+        placeholderContact:"es. Alice",
+        placeholderMsg:    "Digita il tuo messaggio…",
+        svcTapMic:         "🤖 Tocca il microfono",
+        svcWaiting:        "In attesa di scelta…",
+        svcEmail:          "📧 Modalità Email",
+        svcTelegram:       "💬 Modalità Telegram",
+        svcSwitch:         "↺ Cambia servizio",
+        svcReset:          "Servizio reimpostato. Di' 'Email' o 'Telegram'.",
+      },
+      pt: {
+        statusReady:       "Pronto para ouvir",
+        youSaid:           "Você disse:",
+        assistantLabel:    "Assistente:",
+        tabEmail:          "📧 E-mail",
+        tabMessages:       "💬 Mensagens",
+        inboxTitle:        "📥 Caixa de entrada",
+        refreshBtn:        "Atualizar",
+        composeTitle:      "✏️ Redigir e-mail",
+        fieldTo:           "Para",
+        fieldSubject:      "Assunto",
+        fieldMessage:      "Mensagem",
+        sendConfirmBtn:    "🔒 Enviar com confirmação",
+        sendBtn:           "📤 Enviar",
+        clearBtn:          "Limpar",
+        sendMsgTitle:      "💬 Enviar mensagem",
+        contactLabel:      "Para (nome do contato)",
+        messageLabel:      "Mensagem",
+        suggestBtn:        "💡 Sugerir resposta",
+        sendMsgConfirmBtn: "🔒 Enviar com confirmação",
+        msgsTitle:         "📨 Mensagens",
+        allContacts:       "Todos os contatos",
+        tryTitle:          "💡 Tente dizer…",
+        tgVoiceLabel:      "📱 Voz Telegram",
+        tryCmds: [
+          '🗣 "Ler e-mails" — ouvir resumo da caixa',
+          '➡️ "Próximo" — próximo e-mail',
+          '⬅️ "Anterior" — e-mail anterior',
+          '📚 "Ler mais" — continuar e-mail longo',
+          '🔢 "Ler e-mail 2" — ir para e-mail 2',
+          '✉️ "Enviar e-mail"',
+          '⏹ "Parar" — interromper durante a leitura',
+          '❌ "Cancelar" — abortar redação',
+          '🚪 "Sair"',
+          '❓ "Ajuda"',
+        ],
+        tgCmds: [
+          '📨 "Enviar mensagem" — iniciar composição por voz',
+          '\u00a0\u00a01️⃣ Diga o nome do contato (ex. "Vaibhav")',
+          '\u00a0\u00a02️⃣ Diga "sim" para confirmar · ou diga o nome correto',
+          '\u00a0\u00a03️⃣ Diga sua mensagem',
+          '\u00a0\u00a04️⃣ "Sim" para enviar · "cancelar" para abortar',
+          '📋 "Ler mensagens" — ouvir últimas mensagens',
+        ],
+        confirmTitle:      "🔒 Confirmar ação",
+        confirmListen:     "🔊 Ouça com atenção, depois clique em Sim ou Não.",
+        confirmYes:        "✅ Sim, Enviar",
+        confirmNo:         "❌ Cancelar",
+        logoutBtn:         "Sair",
+        placeholderTo:     "destinatario@gmail.com",
+        placeholderSub:    "Assunto",
+        placeholderBody:   "Escreva sua mensagem…",
+        placeholderContact:"ex. Alice",
+        placeholderMsg:    "Digite sua mensagem…",
+        svcTapMic:         "🤖 Toque no microfone",
+        svcWaiting:        "Aguardando escolha…",
+        svcEmail:          "📧 Modo Email",
+        svcTelegram:       "💬 Modo Telegram",
+        svcSwitch:         "↺ Trocar serviço",
+        svcReset:          "Serviço redefinido. Diga 'Email' ou 'Telegram'.",
+      },
+    };
+
+    /**
+     * Apply all UI translations for `lang`.
+     * Falls back to English for any missing key.
+     */
+    function applyTranslations(lang) {
+      const t = _I18N[lang] || _I18N['en'];
+      const e = _I18N['en'];                    // fallback
+      const get = (k) => (t && t[k]) || e[k] || '';
+      // Expose service-badge labels for voice.js
+      window._svcI18n = t;
+
+      // Helper: set textContent safely
+      const setText = (id, key) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = get(key);
+      };
+      // Helper: set placeholder safely
+      const setPlaceholder = (id, key) => {
+        const el = document.getElementById(id);
+        if (el) el.placeholder = get(key);
+      };
+
+      // Voice assistant panel
+      setText('statusText',        'statusReady');
+
+      // Labels
+      setText('youSaidLabelEl',    'youSaid');
+      setText('assistantLabelEl',  'assistantLabel');
+
+      // Tabs
+      setText('tabEmail',   'tabEmail');
+      setText('tabMsg',     'tabMessages');
+
+      // Inbox
+      setText('inboxTitleEl',   'inboxTitle');
+      setText('refreshBtnEl',   'refreshBtn');
+
+      // Compose email
+      setText('composeTitleEl',   'composeTitle');
+      setText('fieldToLabel',     'fieldTo');
+      setText('fieldSubjectLabel','fieldSubject');
+      setText('fieldBodyLabel',   'fieldMessage');
+      setText('sendConfirmBtnEl', 'sendConfirmBtn');
+      setText('sendBtnEl',        'sendBtn');
+      setText('clearBtnEl',       'clearBtn');
+      setPlaceholder('toAddr',    'placeholderTo');
+      setPlaceholder('subject',   'placeholderSub');
+      setPlaceholder('body',      'placeholderBody');
+
+      // Send message panel
+      setText('sendMsgTitleEl',      'sendMsgTitle');
+      setText('contactLabelEl',      'contactLabel');
+      setText('messageLabelEl',      'messageLabel');
+      setText('suggestBtnEl',        'suggestBtn');
+      setText('sendMsgConfirmBtnEl', 'sendMsgConfirmBtn');
+      setText('msgsTitleEl',         'msgsTitle');
+      setPlaceholder('msgReceiver',  'placeholderContact');
+      setPlaceholder('msgText',      'placeholderMsg');
+
+      // Confirm modal
+      setText('confirmModalTitle',  'confirmTitle');
+      setText('confirmStatusMsg',   'confirmListen');
+      setText('confirmYesBtn',      'confirmYes');
+      setText('confirmNoBtn',       'confirmNo');
+
+      // Navbar logout
+      setText('logoutBtnEl', 'logoutBtn');
+
+      // All-contacts filter default option
+      const sel = document.getElementById('msgContactFilter');
+      if (sel && sel.options[0]) sel.options[0].text = get('allContacts');
+
+      // Try saying… panel — email commands list
+      const tryList = document.getElementById('tryCmdsList');
+      if (tryList && t.tryCmds) {
+        tryList.innerHTML = t.tryCmds.map(c => `<li>${c}</li>`).join('');
+      }
+      // Try saying… panel — heading
+      const tryHeading = document.getElementById('trySayingTitle');
+      if (tryHeading) tryHeading.textContent = get('tryTitle');
+      // Try saying… panel — Telegram section label
+      const tgLabel = document.getElementById('tgVoiceLabel');
+      if (tgLabel) tgLabel.textContent = get('tgVoiceLabel');
+      // Try saying… panel — Telegram commands list
+      const tgList = document.getElementById('tgCmdsList');
+      if (tgList && t.tgCmds) {
+        tgList.innerHTML = t.tgCmds.map(c => `<li>${c}</li>`).join('');
+      }
+      // Refresh service badge text with new language
+      if (typeof _updateServiceBadge === 'function') _updateServiceBadge();
+    }
+    function switchTab(tab) {
+      const isEmail = (tab === 'email');
+      document.getElementById('panelEmail').classList.toggle('hidden', !isEmail);
+      document.getElementById('panelMessages').classList.toggle('hidden', isEmail);
+      document.getElementById('tabEmail').className =
+        'tab-btn px-5 py-2 rounded-xl text-sm font-semibold transition ' +
+        (isEmail ? 'active-tab' : 'bg-white/10 hover:bg-white/20');
+      document.getElementById('tabMsg').className =
+        'tab-btn px-5 py-2 rounded-xl text-sm font-semibold transition ' +
+        (!isEmail ? 'active-tab' : 'bg-white/10 hover:bg-white/20');
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // LANGUAGE (Feature 5)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Push the localStorage language value to the Flask server session.
+     * Called once on DOMContentLoaded — keeps server in sync without
+     * overwriting what the user chose.
+     */
+    async function _syncLangWithServer() {
+      try {
+        // 1. Ask the server what it currently has
+        const res  = await fetch('/language');
+        const data = await res.json();
+        const serverLang = data.current || 'en';
+
+        if (serverLang !== _currentLang) {
+          // localStorage differs from server → push our value to the server
+          await fetch('/language', {
+            method : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body   : JSON.stringify({ lang: _currentLang }),
+          });
+        }
+        // Always make sure the dropdown and voice.js internal state reflect
+        // the stored language — prevents the first mic tap from using 'en'.
+        document.getElementById('langSelect').value = _currentLang;
+        if (typeof _setVoiceLang === 'function') _setVoiceLang(_currentLang);
+      } catch {}
+    }
+
+    async function switchLanguage(lang) {
+      // 1. Save to localStorage FIRST — instant, never lost
+      localStorage.setItem(_LS_LANG_KEY, lang);
+      _currentLang = lang;
+      document.getElementById('langSelect').value = lang;
+
+      // 2. Translate all visible UI strings immediately (no server round-trip)
+      applyTranslations(lang);
+
+      try {
+        // 2. Sync with server session in the background
+        const res  = await fetch('/language', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lang }),
+        });
+        const data = await res.json();
+        if (data.lang) {
+          // No need to re-set _currentLang — already done above
+          if (typeof _setVoiceLang === 'function') _setVoiceLang(data.lang);
+          // Play a TTS demo so the user can hear the new voice
+          const demoRes = await fetch('/language/tts-demo', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ lang }),
+          });
+          const demoData = await demoRes.json();
+          if (demoData.audio_url && typeof playTTS === 'function') playTTS(demoData.audio_url);
+          else if (demoData.audio_url) playAudio(demoData.audio_url);
+        }
+      } catch(e) { console.error('Language switch error', e); }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // EMAIL LOADER
+    // ─────────────────────────────────────────────────────────────────────────
     async function loadEmails() {
       const list = document.getElementById('emailList');
       list.innerHTML = '<p class="text-gray-500 text-sm">Loading…</p>';
@@ -253,12 +1158,16 @@
         list.innerHTML = emails.map((e, i) => `
         <div class="email-card flex justify-between items-start bg-white/5 rounded-2xl p-4 transition cursor-pointer"
              onclick="openEmail(${i})">
-          <div class="flex-1 min-w-0 pr-4">
+          <div class="flex-1 min-w-0 pr-3">
             <p class="font-semibold text-sm text-white truncate">${escHtml(e.subject)}</p>
             <p class="text-gray-400 text-xs mt-0.5 truncate">From: ${escHtml(e.from)}</p>
             <p class="text-gray-500 text-xs mt-1 line-clamp-2">${escHtml(e.snippet)}</p>
           </div>
-          <span class="text-xs text-gray-500 whitespace-nowrap">${escHtml(e.date.split(' ').slice(1,4).join(' '))}</span>
+          <div class="flex items-center gap-2 flex-shrink-0">
+            <span class="text-xs text-gray-500 whitespace-nowrap">${escHtml(e.date.split(' ').slice(1,4).join(' '))}</span>
+            <button onclick="event.stopPropagation(); quickSummarizeEmail(${i})"
+              title="Summarize" class="text-blue-400 hover:text-blue-200 text-base leading-none">📄</button>
+          </div>
         </div>
       `).join('');
     }
@@ -310,10 +1219,73 @@
       document.getElementById('body').value = '';
     }
 
-    // ── Email modal ───────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
+    // EMAIL SUMMARIZE (Feature 2)
+    // ─────────────────────────────────────────────────────────────────────────
+    async function quickSummarizeEmail(idx) {
+      const e = _emails[idx];
+      if (!e) return;
+      const box = document.getElementById('emailSummaryBox');
+      const txt = document.getElementById('emailSummaryText');
+      txt.textContent = '⏳ Summarizing…';
+      box.classList.remove('hidden');
+      try {
+        const res  = await fetch('/summarize/tts', {
+          method : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body   : JSON.stringify({ email: e, lang: _currentLang }),
+        });
+        const data = await res.json();
+        txt.textContent = data.summary || 'Could not summarize.';
+        _summaryAudioUrl.email = data.audio_url;
+      } catch { txt.textContent = 'Error during summarization.'; }
+    }
+
+    async function summarizeOpenEmail() {
+      if (_openEmailIdx >= 0) {
+        document.getElementById('emailModal').classList.add('hidden');
+        await quickSummarizeEmail(_openEmailIdx);
+      }
+    }
+
+    function playSummaryAudio(type) {
+      const url = _summaryAudioUrl[type];
+      if (url) playAudio(url);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // EMAIL SUGGEST REPLY (Feature 3)
+    // ─────────────────────────────────────────────────────────────────────────
+    async function suggestEmailReply() {
+      const e = _emails[_openEmailIdx];
+      if (!e) return;
+      const text = (e.subject || '') + ' ' + (e.snippet || e.body || '');
+      const res  = await fetch('/reply/suggest-tts', {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({ message: text, lang: _currentLang }),
+      });
+      const data = await res.json();
+      // Pre-fill compose with first suggestion and close modal
+      document.getElementById('emailModal').classList.add('hidden');
+      const subj = (e.subject || '').startsWith('Re:') ? e.subject : 'Re: ' + (e.subject || '');
+      const from = (e.from || '');
+      const match = from.match(/<(.+?)>/);
+      document.getElementById('toAddr').value    = match ? match[1] : from;
+      document.getElementById('subject').value   = subj;
+      document.getElementById('body').value      = data.primary || '';
+      if (data.audio_url) playAudio(data.audio_url);
+      switchTab('email');
+      document.getElementById('toAddr').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // EMAIL MODAL
+    // ─────────────────────────────────────────────────────────────────────────
     function openEmail(idx) {
       const e = _emails[idx];
       if (!e) return;
+      _openEmailIdx = idx;
       document.getElementById('modalSubject').textContent = e.subject || '(No subject)';
       document.getElementById('modalFrom').textContent    = 'From: ' + e.from;
       document.getElementById('modalDate').textContent    = e.date;
@@ -338,7 +1310,267 @@
       document.getElementById('toAddr').focus();
     }
 
-    // ── Logout ────────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
+    // VOICE CONFIRMATION (Feature 4)
+    // ─────────────────────────────────────────────────────────────────────────
+    /**
+     * Show the confirmation modal, play TTS audio, wait for user click.
+     * Returns Promise<boolean>  true = confirmed,  false = cancelled.
+     */
+    function showConfirmModal(actionText) {
+      return new Promise(async (resolve) => {
+        _confirmResolve = resolve;
+        document.getElementById('confirmActionText').textContent = actionText;
+        document.getElementById('confirmStatusMsg').textContent  = '🔊 Generating confirmation audio…';
+        document.getElementById('confirmModal').classList.remove('hidden');
+
+        // Ask server to generate TTS confirmation prompt
+        try {
+          const res  = await fetch('/confirm/start', {
+            method : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body   : JSON.stringify({ action_text: actionText, lang: _currentLang }),
+          });
+          const data = await res.json();
+          if (data.audio_url) {
+            document.getElementById('confirmStatusMsg').textContent = '🔊 Listen carefully, then click Yes or No.';
+            playAudio(data.audio_url);
+          }
+        } catch {
+          document.getElementById('confirmStatusMsg').textContent = 'Click Yes to confirm or No to cancel.';
+        }
+      });
+    }
+
+    function resolveConfirm(confirmed) {
+      document.getElementById('confirmModal').classList.add('hidden');
+      if (_confirmResolve) { _confirmResolve(confirmed); _confirmResolve = null; }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // SEND EMAIL WITH CONFIRMATION
+    // ─────────────────────────────────────────────────────────────────────────
+    async function sendEmailWithConfirm() {
+      const to      = document.getElementById('toAddr').value.trim();
+      const subject = document.getElementById('subject').value.trim();
+      const body    = document.getElementById('body').value.trim();
+
+      if (!to || !subject || !body) {
+        alert('Please fill in all fields before sending.');
+        return;
+      }
+
+      const actionText = `send an email to ${to} with subject: ${subject}`;
+      const confirmed  = await showConfirmModal(actionText);
+
+      if (!confirmed) {
+        showSendStatus('emailSendStatus', 'Send cancelled.', false);
+        return;
+      }
+
+      // Proceed with actual send
+      const statusDiv = document.getElementById('sendStatus');
+      try {
+        const res  = await fetch('/send-email', {
+          method : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body   : JSON.stringify({ to, subject, body }),
+        });
+        const data = await res.json();
+        statusDiv.textContent = data.message || (data.success ? 'Sent!' : 'Failed.');
+        statusDiv.className = res.ok
+          ? 'mt-3 text-center text-sm rounded-xl py-2 px-4 bg-green-900/40 text-green-300'
+          : 'mt-3 text-center text-sm rounded-xl py-2 px-4 bg-red-900/40 text-red-300';
+        statusDiv.classList.remove('hidden');
+        if (res.ok) clearCompose();
+      } catch {
+        statusDiv.textContent = 'Network error.';
+        statusDiv.className   = 'mt-3 text-center text-sm rounded-xl py-2 px-4 bg-red-900/40 text-red-300';
+        statusDiv.classList.remove('hidden');
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // MESSAGES (Feature 1)
+    // ─────────────────────────────────────────────────────────────────────────
+    async function loadContacts() {
+      try {
+        const res   = await fetch('/messages/contacts');
+        const data  = await res.json();
+        const dl    = document.getElementById('contactsList');
+        const sel   = document.getElementById('msgContactFilter');
+        dl.innerHTML  = (data.contacts || []).map(c => `<option value="${escHtml(c)}"/>`).join('');
+        // Rebuild the filter dropdown
+        const base  = '<option value="">All Contacts</option>';
+        sel.innerHTML = base + (data.contacts || []).map(c =>
+          `<option value="${escHtml(c)}">${escHtml(c)}</option>`).join('');
+      } catch {}
+    }
+
+    async function loadMessages(contact = '') {
+      const list = document.getElementById('messageList');
+      list.innerHTML = '<p class="text-gray-500 text-sm">Loading…</p>';
+      try {
+        const url  = '/messages' + (contact ? `?contact=${encodeURIComponent(contact)}` : '');
+        const res  = await fetch(url);
+        const data = await res.json();
+        _messages  = data.messages || [];
+        renderMessages(_messages);
+      } catch {
+        list.innerHTML = '<p class="text-red-400 text-sm">Failed to load messages.</p>';
+      }
+    }
+
+    function renderMessages(messages) {
+      const list = document.getElementById('messageList');
+      if (!messages.length) {
+        list.innerHTML = '<p class="text-gray-500 text-sm">No messages yet. Send your first message!</p>';
+        return;
+      }
+      list.innerHTML = messages.map((m, i) => {
+        const isMe  = m.sender === 'me';
+        const align = isMe ? 'ml-auto bg-purple-800/50 text-right' : 'mr-auto bg-white/10';
+        return `
+          <div class="max-w-[85%] ${align} rounded-2xl p-3 relative group">
+            <p class="text-xs text-gray-400 mb-1">${escHtml(isMe ? 'You → ' + m.receiver : m.sender)} · ${escHtml(m.timestamp.replace('T',' '))}</p>
+            <p class="text-sm text-white">${escHtml(m.text)}</p>
+            <div class="hidden group-hover:flex gap-2 mt-2 justify-end">
+              <button onclick="quickSummarizeMsg(${i})" title="Summarize"
+                class="text-xs bg-blue-700/50 hover:bg-blue-700 px-2 py-1 rounded-lg">📄</button>
+              <button onclick="prefillReply('${escHtml(m.sender !== 'me' ? m.sender : m.receiver)}', ${i})" title="Suggest Reply"
+                class="text-xs bg-green-700/50 hover:bg-green-700 px-2 py-1 rounded-lg">💬</button>
+            </div>
+          </div>`;
+      }).join('');
+    }
+
+    async function quickSummarizeMsg(idx) {
+      const m   = _messages[idx];
+      if (!m) return;
+      const box = document.getElementById('msgSummaryBox');
+      const txt = document.getElementById('msgSummaryText');
+      txt.textContent = '⏳ Summarizing…';
+      box.classList.remove('hidden');
+      try {
+        const res  = await fetch('/summarize/tts', {
+          method : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body   : JSON.stringify({ message: m, lang: _currentLang }),
+        });
+        const data = await res.json();
+        txt.textContent = data.summary || 'Could not summarize.';
+        _summaryAudioUrl.message = data.audio_url;
+      } catch { txt.textContent = 'Error.'; }
+    }
+
+    async function prefillReply(contact, idx) {
+      const m = _messages[idx];
+      document.getElementById('msgReceiver').value = contact;
+      // Get suggested reply
+      if (m) {
+        const res  = await fetch('/reply/suggest-tts', {
+          method : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body   : JSON.stringify({ message: m.text, lang: _currentLang }),
+        });
+        const data = await res.json();
+        document.getElementById('msgText').value = data.primary || '';
+        renderReplySuggestions(data.suggestions || [], contact);
+        if (data.audio_url) playAudio(data.audio_url);
+      }
+    }
+
+    async function getSuggestReply() {
+      const text = document.getElementById('msgText').value.trim() ||
+                   document.getElementById('msgReceiver').value.trim();
+      if (!text) { alert('Type a message first to get reply suggestions.'); return; }
+      try {
+        const res  = await fetch('/reply/suggest', {
+          method : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body   : JSON.stringify({ message: text }),
+        });
+        const data = await res.json();
+        const contact = document.getElementById('msgReceiver').value.trim();
+        renderReplySuggestions(data.suggestions || [], contact);
+      } catch { alert('Could not get suggestions.'); }
+    }
+
+    function renderReplySuggestions(suggestions, contact) {
+      const box  = document.getElementById('replyBox');
+      const list = document.getElementById('replyList');
+      if (!suggestions.length) { box.classList.add('hidden'); return; }
+      list.innerHTML = suggestions.map((s, i) =>
+        `<button onclick="useReply('${escHtml(s).replace(/'/g, "\\'")}')"  
+           class="w-full text-left text-xs bg-white/5 hover:bg-white/15 border border-white/10
+                  rounded-xl px-3 py-2 text-gray-200 transition">
+           ${i + 1}. ${escHtml(s)}
+         </button>`
+      ).join('');
+      box.classList.remove('hidden');
+    }
+
+    function useReply(text) {
+      document.getElementById('msgText').value = text;
+      document.getElementById('replyBox').classList.add('hidden');
+    }
+
+    async function sendMessageWithConfirm() {
+      const receiver = document.getElementById('msgReceiver').value.trim();
+      const message  = document.getElementById('msgText').value.trim();
+
+      if (!receiver || !message) {
+        alert('Please enter a receiver name and message.');
+        return;
+      }
+
+      const actionText = `send a message to ${receiver}: "${message.substring(0, 60)}${message.length > 60 ? '…' : ''}"`;
+      const confirmed  = await showConfirmModal(actionText);
+
+      const statusDiv = document.getElementById('msgSendStatus');
+      if (!confirmed) {
+        statusDiv.textContent = 'Send cancelled.';
+        statusDiv.className   = 'mt-3 text-center text-sm rounded-xl py-2 px-4 bg-yellow-900/40 text-yellow-300';
+        statusDiv.classList.remove('hidden');
+        return;
+      }
+
+      try {
+        const res  = await fetch('/messages/send', {
+          method : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body   : JSON.stringify({ receiver, message }),
+        });
+        const data = await res.json();
+        statusDiv.textContent = data.message || (data.success ? 'Message sent!' : 'Failed to send.');
+        statusDiv.className = res.ok
+          ? 'mt-3 text-center text-sm rounded-xl py-2 px-4 bg-green-900/40 text-green-300'
+          : 'mt-3 text-center text-sm rounded-xl py-2 px-4 bg-red-900/40 text-red-300';
+        statusDiv.classList.remove('hidden');
+        if (res.ok) {
+          document.getElementById('msgText').value = '';
+          await loadMessages();
+          await loadContacts();
+        }
+      } catch {
+        statusDiv.textContent = 'Network error.';
+        statusDiv.className   = 'mt-3 text-center text-sm rounded-xl py-2 px-4 bg-red-900/40 text-red-300';
+        statusDiv.classList.remove('hidden');
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // AUDIO HELPER
+    // ─────────────────────────────────────────────────────────────────────────
+    function playAudio(url) {
+      const audio = document.getElementById('ttsAudio');
+      audio.src   = url;
+      audio.play().catch(() => {});
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // LOGOUT
+    // ─────────────────────────────────────────────────────────────────────────
     async function logoutUser() {
       await fetch('/logout');
       window.location.href = '/';

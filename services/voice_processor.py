@@ -19,6 +19,7 @@ from werkzeug.datastructures import FileStorage
 from services.stt_whisper import transcribe, _model as _whisper_model
 from services.tts_engine import speak_to_file
 from services.email_service import fetch_emails, send_email
+from services.messaging_service import send_message as tg_send, read_latest_message as tg_read, get_all_messages as tg_all
 from config import Config
 
 logger = logging.getLogger(__name__)
@@ -65,9 +66,22 @@ _INTENTS = {
         "more",                   # bare "more"
         "next part", "next chunk",
     ],
-    # send_email must be listed before read_email so that keywords like
-    # "cent" (mishearing of "send") are matched before the generic "email"
-    # substring in read_email grabs the whole phrase.
+    # ── Telegram messaging — listed BEFORE send_email so "send message"
+    #    doesn't get swallowed by the bare "send" keyword in send_email ───────
+    "send_message": [
+        "send message", "send a message", "send telegram",
+        "message to", "telegram to", "text to",
+        "whatsapp", "send chat", "telegram message",
+        "send msg", "send sms",
+    ],
+    "read_messages": [
+        "read messages", "read message", "show messages",
+        "check messages", "any messages", "new messages",
+        "telegram inbox", "read telegram", "messages from",
+        "what messages", "got any messages",
+    ],
+    # send_email must be listed AFTER send_message so multi-word Telegram
+    # phrases are matched before the bare "send" / "cent" keywords below.
     "send_email": [
         "send", "cent", "sent", "sand", "ends",
         "compose", "composed",
@@ -92,9 +106,128 @@ _INTENTS = {
         "help", "held", "heap", "hell",
         "what can", "commands", "command",
     ],
+    # ── Email summarization (email-mode only) ───────────────────────────────
+    "summarize_email": [
+        "summarize", "summarize email", "summarize this email", "summarize the email",
+        "summarize email 1", "summarize email 2", "summarize email 3",
+        "summarize email 4", "summarize email 5",
+        "summarize email one", "summarize email two", "summarize email three",
+        "summarize email four", "summarize email five",
+        "summarize all", "summarize all emails", "summarize each email",
+        "summarize inbox", "summary of all emails", "give me summaries",
+        "give me a summary", "email summary", "brief summary",
+        "tldr", "tl dr", "what's the summary", "what is the summary",
+        "short version", "make it short", "shorten this", "shorten the email",
+        "quick summary", "summarise", "summarise email",
+        "summarise all", "summarise all emails",
+    ],
+    # ── Message summarization (telegram-mode only) ───────────────────────────
+    "summarize_message": [
+        "summarize messages", "summarize message", "summarize telegram",
+        "message summary", "messages summary", "summarise messages",
+        "brief messages", "quick message summary",
+    ],
+    # ── Telegram messaging (moved to top of dict — see comment there) ────────
+    "switch_service": [
+        "switch service", "change service", "switch mode", "change mode",
+        "back to menu", "main menu", "restart service",
+        "different service", "start over",
+    ],
+    # ── Language switching (global — works in any service mode) ──────────────
+    "set_language": [
+        # Hindi
+        "hindi", "switch to hindi", "hindi language", "hindi mode",
+        "change to hindi", "speak hindi", "use hindi",
+        # Marathi
+        "marathi", "switch to marathi", "marathi language", "marathi mode",
+        "change to marathi", "speak marathi", "use marathi",
+        # English (revert to default)
+        "switch to english", "english language", "english mode",
+        "change to english", "speak english", "use english",
+        # Spanish
+        "spanish", "switch to spanish", "spanish language",
+        "change to spanish", "speak spanish", "use spanish",
+        # French
+        "french", "switch to french", "french language",
+        "change to french", "speak french", "use french",
+        # German
+        "german", "switch to german", "german language",
+        "change to german", "speak german", "use german",
+        # Italian
+        "italian", "switch to italian", "italian language",
+        "change to italian", "speak italian", "use italian",
+        # Portuguese
+        "portuguese", "switch to portuguese", "portuguese language",
+        "change to portuguese", "speak portuguese", "use portuguese",
+        # Generic
+        "change language", "switch language", "language change",
+        "change the language", "set language",
+    ],
 }
 
-# ── Stop-reading signals ───────────────────────────────────────────────────────
+# ── Phonetic romanized command variants ──────────────────────────────────────
+# Whisper sometimes transcribes Hindi/Marathi speech using Roman characters
+# instead of Devanagari (especially with the 'base' model and 'en' fallback).
+# These entries are added to the standard intent keyword tables so intent
+# detection catches them via normal substring matching.
+# Format: exact lowercase romanized transcription → intent key
+_PHONETIC_COMMANDS: dict[str, str] = {
+    # ── Marathi (romanized Whisper outputs) ────────────────────────────────
+    # संदेश पाठवा  → send message
+    "sandesh pathava": "send_message",
+    "sendesh patava":  "send_message",
+    "sandesh patava":  "send_message",
+    "sandesh pahava":  "send_message",
+    "sandesh patha":   "send_message",
+    # संदेश वाचा → read messages
+    "sandesh vacha":   "read_messages",
+    "sendesh vacha":   "read_messages",
+    "sandesh wacha":   "read_messages",
+    # ईमेल वाचा → read email
+    "email vacha":     "read_email",
+    "email wachaa":    "read_email",
+    # ईमेल पाठवा → send email
+    "email pathava":   "send_email",
+    "email patava":    "send_email",
+    # पुढील → next
+    "pudhil":          "next_email",
+    "pudil":           "next_email",
+    "pude":            "next_email",
+    # मागील → previous
+    "magil":           "prev_email",
+    "mageel":          "prev_email",
+    "maagil":          "prev_email",
+    # सारांश → summarize
+    "saransh":         "summarize_email",
+    "saaransh":        "summarize_email",
+    # थांबा → stop
+    "thamba":          "stop_reading",
+    "thaamb":          "stop_reading",
+    # ── Hindi (romanized Whisper outputs) ──────────────────────────────────
+    # संदेश भेजो → send message
+    "sandesh bhejo":   "send_message",
+    "sandesh bhejo":   "send_message",
+    "message bhejo":   "send_message",
+    # संदेश पढ़ो → read messages
+    "sandesh padho":   "read_messages",
+    "sandesh paro":    "read_messages",
+    # ईमेल पढ़ो → read email
+    "email padho":     "read_email",
+    "email paro":      "read_email",
+    # ईमेल भेजो → send email
+    "email bhejo":     "send_email",
+    # अगला → next
+    "agla":            "next_email",
+    "agala":           "next_email",
+    # पिछला → previous
+    "pichla":          "prev_email",
+    "pichala":         "prev_email",
+    # रुको → stop
+    "ruko":            "stop_reading",
+    "rukho":           "stop_reading",
+}
+
+
 # "stop" is often heard as: top, stock, shop, cop, drop, prop, stuff, step,
 #  stoop, store, storm, sport, spot,ktop, scop, stab, stub, stomp, stoppe
 _STOP_EXACT = {
@@ -120,12 +253,28 @@ _CANCEL_EXACT = {
     "stop sending", "cancel email", "cancel sending", "cancel it",
 }
 
+# ── Explicit cancel signals (no ambiguous single words like "no", "not") ──────
+# Used at content-entry steps (to, subject, body, text) where user input is
+# expected — single words like "no" must NOT cancel the compose flow.
+_EXPLICIT_CANCEL = {
+    "cancel", "cancel email", "cancel message", "cancel sending",
+    "cancel it", "cancel compose",
+    "cancelled", "cancelling",
+    "abort", "a board", "aboard",
+    "never mind", "nevermind", "never mine",
+    "forget it", "forget that",
+    "don't send", "do not send", "don't do it",
+    "stop sending", "exit compose", "stop composing", "quit compose",
+}
+
 # ── Confirm signals ───────────────────────────────────────────────────────────
 # "yes" → yet, yes, yep, yeah, ya, yah, yea, jest, chest
 # "confirm" → conform, conformed, confirmed
 # "ok" → oak, okay, ok, o.k.
 _CONFIRM_EXACT = {
     "yes", "yet", "yep", "yeah", "ya", "yah", "yea", "jest",
+    # Romanized Hindi/Marathi 'yes' (Whisper output when mic lang is hi/mr)
+    "ha", "haa", "haan", "han", "ho", "hoy", "hoji",
     "confirm", "confirmed", "conform", "conformed",
     "ok", "okay", "o.k.", "oak",
     "send it", "do it", "go ahead", "go", "proceed",
@@ -305,26 +454,166 @@ def _detect_intent(text: str, session: dict) -> str:
     if not lower:
         return "unknown"
 
+    # ── While message compose is active ──────────────────────────────────────
+    # Each step has different cancel sensitivity to avoid false positives.
+    if session.get("msg_compose"):
+        step = session["msg_compose"].get("step")
+
+        if step == "to":
+            # Capturing contact name: ONLY cancel on unambiguous explicit phrases.
+            # Single words like "no", "not", "nope" must NOT cancel here.
+            if _any_token_matches(lower, _EXPLICIT_CANCEL):
+                return "cancel_message"
+            return "send_message"  # any utterance = contact name
+
+        elif step == "to_confirm":
+            # User is confirming the name or providing a correction.
+            # Explicit cancel → cancel. Confirm words → advance. Anything else = correction.
+            if _any_token_matches(lower, _EXPLICIT_CANCEL):
+                return "cancel_message"
+            if _any_token_matches(lower, _CONFIRM_EXACT):
+                return "send_message"  # confirmed
+            return "send_message"  # treat as corrected name
+
+        elif step == "text":
+            # Capturing message body: ONLY cancel on explicit phrases.
+            if _any_token_matches(lower, _EXPLICIT_CANCEL):
+                return "cancel_message"
+            return "send_message"  # any utterance = message content
+
+        elif step == "confirm":
+            # Final confirm/cancel step: yes/no both fully valid here.
+            if _any_token_matches(lower, _CONFIRM_EXACT):
+                return "send_message"
+            if _any_token_matches(lower, _CANCEL_EXACT):
+                return "cancel_message"
+            return "cancel_message"  # unknown at confirm = treat as cancel
+
+        else:
+            # Unknown step fallback
+            if _any_token_matches(lower, _EXPLICIT_CANCEL):
+                return "cancel_message"
+            return "send_message"
+
     # ── While email compose is active ────────────────────────────────────────
     if session.get("email_compose"):
-        # Cancel beats everything
-        if _any_token_matches(lower, _CANCEL_EXACT):
-            return "cancel_email"
-        # At confirm step, check for yes/no explicitly
         step = session["email_compose"].get("step")
-        if step == "confirm":
+
+        if step == "to":
+            # Capturing recipient address: only explicit cancel phrases cancel.
+            if _any_token_matches(lower, _EXPLICIT_CANCEL):
+                return "cancel_email"
+            return "send_email"
+
+        elif step == "subject":
+            # Capturing subject: only explicit cancel.
+            if _any_token_matches(lower, _EXPLICIT_CANCEL):
+                return "cancel_email"
+            return "send_email"
+
+        elif step == "body":
+            # Capturing body: only explicit cancel.
+            if _any_token_matches(lower, _EXPLICIT_CANCEL):
+                return "cancel_email"
+            return "send_email"
+
+        elif step == "confirm":
+            # Final confirm/cancel step: all cancel words valid here.
             if _any_token_matches(lower, _CONFIRM_EXACT):
-                return "send_email"   # processor handles actual send
-            # Anything non-confirm at confirm step = cancel
+                return "send_email"
             if _any_token_matches(lower, _CANCEL_EXACT):
                 return "cancel_email"
-        return "send_email"   # all other utterances feed the compose flow
+            return "cancel_email"  # unknown at confirm = treat as cancel
+
+        else:
+            if _any_token_matches(lower, _EXPLICIT_CANCEL):
+                return "cancel_email"
+            return "send_email"
 
     # ── Stop reading (checked before general intents) ─────────────────────────
     if _any_token_matches(lower, _STOP_EXACT):
         return "stop_reading"
 
-    # ── "read email N" / "email number N" — positional navigation ────────────
+    # ── Native-language command matching (offline fallback) ───────────────────
+    # When translate_to_english is unavailable or returned unchanged text,
+    # try matching against the per-language command table directly.
+    # This runs BEFORE the English intent loop so native commands always work.
+    _session_lang = session.get("language", "en")
+    if _session_lang != "en":
+        try:
+            from services.lang_utils import NATIVE_COMMANDS
+            _native = NATIVE_COMMANDS.get(_session_lang, {})
+            for _intent, _phrases in _native.items():
+                if _intent.startswith("_"):
+                    continue  # skip _confirm / _cancel meta-keys
+                if any(p in lower for p in _phrases):
+                    return _intent
+        except Exception:
+            pass  # fail silently — English path still follows
+
+    # ── Phonetic romanized command matching ───────────────────────────────────
+    # Catches Whisper's Roman-character output when it can't render Devanagari
+    # (e.g. "sendesh patava" → send_message).  Checked for ALL languages since
+    # even 'en' sessions can receive phonetic spillover from native speakers.
+    for _phrase, _intent in _PHONETIC_COMMANDS.items():
+        if _phrase in lower:
+            # Respect service filter so telegram-only intents don't fire in email mode
+            _es_active = session.get("active_service")
+            _EMAIL_ONLY   = {"list_emails", "read_email", "next_email", "prev_email",
+                             "read_more", "send_email", "cancel_email", "summarize_email"}
+            _TELE_ONLY    = {"send_message", "read_messages", "cancel_message", "summarize_message"}
+            if _es_active == "email"    and _intent in _TELE_ONLY:   continue
+            if _es_active == "telegram" and _intent in _EMAIL_ONLY:  continue
+            return _intent
+
+    # ── Service-aware routing: skip intents that don't belong to active service
+    active_service = session.get("active_service")  # 'email' | 'telegram' | None
+    _EMAIL_ONLY_INTENTS    = {"list_emails", "read_email", "next_email", "prev_email",
+                               "read_more", "send_email", "cancel_email", "summarize_email"}
+    _TELEGRAM_ONLY_INTENTS = {"send_message", "read_messages", "cancel_message", "summarize_message"}
+
+    def _service_allowed(intent: str) -> bool:
+        if active_service == "email"    and intent in _TELEGRAM_ONLY_INTENTS:
+            return False
+        if active_service == "telegram" and intent in _EMAIL_ONLY_INTENTS:
+            return False
+        return True
+
+    # ── "summarize email N" / "summarize all" ────────────────────────────────
+    _sum_num_map = {
+        "one": 0, "1": 0, "two": 1, "2": 1, "three": 2, "3": 2,
+        "four": 3, "4": 3, "five": 4, "5": 4,
+    }
+    if _service_allowed("summarize_email"):
+        sum_all = re.search(
+            r'\b(?:summarize|summarise)\s+(?:all|each|every|inbox)\b', lower
+        )
+        if sum_all:
+            session["_summarize_all"] = True
+            session.pop("_summarize_idx", None)
+            session.modified = True
+            return "summarize_email"
+
+        sum_num = re.search(
+            r'\b(?:summarize|summarise)\s+(?:email|mail)?\s*'
+            r'(one|two|three|four|five|1|2|3|4|5)\b',
+            lower
+        )
+        if sum_num:
+            session["_summarize_idx"] = _sum_num_map.get(sum_num.group(1), 0)
+            session.pop("_summarize_all", None)
+            session.modified = True
+            return "summarize_email"
+
+        # Bare "summarize [email/mail/this/the/...]" — must be caught here
+        # BEFORE the standard intent loop where read_email's "email" keyword
+        # would otherwise match first.
+        if re.search(r'\b(?:summarize|summarise)\b', lower):
+            session.pop("_summarize_idx", None)
+            session.pop("_summarize_all", None)
+            return "summarize_email"
+
+    # ── "read email N" / "email number N" — positional navigation ──────────
     _num_map = {
         "one": 1, "1": 1, "two": 2, "2": 2, "three": 3, "3": 3,
         "four": 4, "4": 4, "five": 5, "5": 5,
@@ -337,19 +626,48 @@ def _detect_intent(text: str, session: dict) -> str:
     if not m:
         m = re.search(r'(?:email|message)\s+(?:number\s+)?(one|two|three|four|five|1|2|3|4|5)\b', lower)
     if m:
-        session["_goto_email_idx"] = _num_map.get(m.group(1), 1) - 1
-        session.modified = True
-        return "next_email"
+        if _service_allowed("next_email"):
+            session["_goto_email_idx"] = _num_map.get(m.group(1), 1) - 1
+            session.modified = True
+            return "next_email"
 
-    # ── Standard intent matching — list_emails / next / prev / read_more come
-    #    first in _INTENTS so they match before read_email's generic keywords ─
+    # ── Language switching — highest priority, not filtered by active service ──
+    _LANG_KW = {
+        "hi": ["hindi", "switch to hindi", "hindi language", "hindi mode",
+               "change to hindi", "speak hindi", "use hindi"],
+        "mr": ["marathi", "switch to marathi", "marathi language", "marathi mode",
+               "change to marathi", "speak marathi", "use marathi"],
+        "en": ["switch to english", "english language", "english mode",
+               "change to english", "speak english", "use english"],
+        "es": ["spanish", "español", "switch to spanish", "spanish language",
+               "change to spanish", "speak spanish", "use spanish"],
+        "fr": ["french", "français", "francais", "switch to french", "french language",
+               "change to french", "speak french", "use french"],
+        "de": ["german", "deutsch", "switch to german", "german language",
+               "change to german", "speak german", "use german"],
+        "it": ["italian", "italiano", "switch to italian", "italian language",
+               "change to italian", "speak italian", "use italian"],
+        "pt": ["portuguese", "português", "portugues", "switch to portuguese",
+               "portuguese language", "change to portuguese", "speak portuguese"],
+    }
+    for _lc, _triggers in _LANG_KW.items():
+        if any(t in lower for t in _triggers):
+            session["_set_lang_code"] = _lc
+            session.modified = True
+            return "set_language"
+
+    # ── Standard intent matching ──────────────────────────────────────────────
     for intent, keywords in _INTENTS.items():
+        if not _service_allowed(intent):
+            continue
         if any(kw in lower for kw in keywords):
             return intent
 
-    # Fuzzy fallback — try every token against every keyword list
+    # Fuzzy fallback
     words = lower.split()
     for intent, keywords in _INTENTS.items():
+        if not _service_allowed(intent):
+            continue
         kw_set = set(keywords)
         for w in words:
             if _fuzzy_match(w, kw_set, cutoff=0.70):
@@ -446,6 +764,28 @@ def _tts_safe(text: str) -> str:
     text = re.sub(r'https?://\S+', 'link', text)
     # Collapse whitespace
     text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
+
+def _normalize_contact_name(raw: str) -> str:
+    """
+    Fix Whisper spelling-out artefact: "R-U-T-I-K." or "R U T I K" → "Rutik".
+    Strips trailing punctuation first (Whisper often adds a period/comma),
+    then collapses separated single letters into one capitalised word.
+    """
+    text = raw.strip()
+    # Strip trailing punctuation that Whisper appends (e.g. "R-U-T-I-K.")
+    text = text.rstrip('.,!?;:')
+    # Pattern 1: letters separated by hyphens e.g. "R-U-T-I-K" or "r-u-t-i-k"
+    if re.fullmatch(r'[A-Za-z](?:-[A-Za-z])+', text):
+        return text.replace('-', '').capitalize()
+    # Pattern 2: single letters separated by spaces e.g. "R U T I K"
+    parts = text.split()
+    if len(parts) >= 2 and all(len(p) == 1 and p.isalpha() for p in parts):
+        return ''.join(parts).capitalize()
+    # Pattern 3: letters separated by dots e.g. "R.U.T.I.K"
+    if re.fullmatch(r'[A-Za-z](?:\.[A-Za-z])+', text):
+        return text.replace('.', '').capitalize()
     return text
 
 
@@ -583,13 +923,119 @@ def _handle_stop_reading() -> str:
 
 def _handle_cancel_email(session: dict) -> str:
     session.pop("email_compose", None)
+    session.modified = True
     return "Email cancelled. What else can I help you with?"
 
 
-def _handle_send_email(session: dict, transcription: str) -> str:
-    """Multi-step voice-guided email compose with cancel support at every step."""
-    lower    = transcription.lower()
+def _handle_summarize_email(session: dict) -> str:
+    """
+    Summarize emails by voice:
+      - "summarize email"     → 1-line summary of currently loaded email
+      - "summarize email 2"   → 1-line summary of email #2 in cache
+      - "summarize all emails"→ 1-line summary of every loaded email
+    """
+    from services.summarizer import summarize_text
+
+    emails = _get_cached_emails(session)
+    if not emails:
+        return (
+            "No emails are loaded yet. "
+            "Please say 'read emails' first to load your inbox."
+        )
+
+    def _one_line(email: dict, number: int) -> str:
+        """Return a sharp 1-line summary string for a single email dict."""
+        body    = (email.get("body") or email.get("snippet") or "").strip()
+        subject = _tts_safe(email.get("subject", "No subject"))
+        sender  = _clean_sender(email.get("from", "Unknown"))
+        if not body:
+            return f"Email {number} from {sender} has no readable content."
+        full_text = f"{subject}. {body}" if subject else body
+        summary   = summarize_text(full_text, mode="extractive")
+        return f"Email {number}: {summary}"
+
+    # ── Summarize all loaded emails ────────────────────────────────────────
+    if session.pop("_summarize_all", False):
+        session.modified = True
+        lines = [_one_line(e, i + 1) for i, e in enumerate(emails)]
+        intro = f"Here are one-line summaries of your {len(emails)} emails. "
+        return intro + " ".join(lines)
+
+    # ── Summarize a specific email by number ───────────────────────────────
+    specific = session.pop("_summarize_idx", None)
+    if specific is not None:
+        session.modified = True
+        if specific >= len(emails):
+            return (
+                f"You only have {len(emails)} email"
+                f"{'s' if len(emails) != 1 else ''} loaded. "
+                "Please say a valid email number."
+            )
+        # Jump the read pointer to the selected email so navigation stays consistent
+        session["_email_read_idx"]   = specific
+        session["_email_read_chunk"] = 0
+        session.modified = True
+        return _one_line(emails[specific], specific + 1)
+
+    # ── Summarize currently loaded email ─────────────────────────────────
+    idx = session.get("_email_read_idx", 0)
+    if idx >= len(emails):
+        idx = 0
+    return _one_line(emails[idx], idx + 1)
+
+
+def _handle_summarize_message(session: dict) -> str:
+    """Summarize the most recent Telegram messages."""
+    from services.summarizer import summarize_text
+    result = tg_all()
+    msgs   = result.get("messages", [])
+    if not msgs:
+        return "You have no Telegram messages to summarize."
+    latest = msgs[-5:]
+    parts  = []
+    for m in latest:
+        sender = _tts_safe(m.get("sender", "Unknown"))
+        text   = _tts_safe(m.get("text",   ""))
+        if text.strip():
+            parts.append(f"From {sender}: {text}")
+    if not parts:
+        return "No message content found to summarize."
+    combined = ". ".join(parts)
+    summary  = summarize_text(combined, mode="simple", max_sentences=3)
+    return f"Summary of your recent Telegram messages: {summary}"
+
+
+def _handle_send_email(session: dict, transcription: str, eng_text: str = "") -> str:
+    """
+    Multi-step voice-guided email compose with cancel support at every step.
+
+    `transcription` — raw Whisper output in the user's language (used to
+                      capture recipient, subject, body as the user spoke them).
+    `eng_text`      — English-normalised version of the same utterance (used
+                      for confirm/cancel keyword matching so native-language
+                      'yes'/'no'/etc. are recognised correctly).
+    """
+    # Use english-normalised text for control words; fall back to transcription.
+    ctrl_lower = (eng_text or transcription).lower()
+    lower      = transcription.lower()
     compose  = session.get("email_compose")
+
+    # Helper: check confirm/cancel in the session language as an offline fallback.
+    def _is_native_confirm() -> bool:
+        try:
+            from services.lang_utils import NATIVE_COMMANDS
+            lang = session.get("language", "en")
+            return any(p in ctrl_lower for p in NATIVE_COMMANDS.get(lang, {}).get("_confirm", []))
+        except Exception:
+            return False
+
+    def _is_native_cancel() -> bool:
+        try:
+            from services.lang_utils import NATIVE_COMMANDS
+            lang = session.get("language", "en")
+            return any(p in ctrl_lower for p in NATIVE_COMMANDS.get(lang, {}).get("_cancel", []))
+        except Exception:
+            return False
 
     # ── Step 0: start the flow ────────────────────────────────────────────────
     if compose is None:
@@ -651,12 +1097,15 @@ def _handle_send_email(session: dict, transcription: str) -> str:
             f"Ready to send. "
             f"To: {readable_to}. Subject: {subject}. "
             f"Message: {body}. "
-            f"Say yes or confirm to send, or cancel to abort."
+            f"Say yes or confirm to send, or say cancel to stop."
         )
 
     # ── Step 4: confirm ───────────────────────────────────────────────────────
     elif step == "confirm":
-        if _any_token_matches(lower, _CONFIRM_EXACT):
+        # Check against ctrl_lower (English-normalised) so native-language
+        # confirmations like "हाँ", "oui", "sí" etc. are recognised.
+        # Also check native phrases directly as offline fallback.
+        if _any_token_matches(ctrl_lower, _CONFIRM_EXACT) or _is_native_confirm():
             to      = compose["to"]
             subject = compose["subject"]
             body    = compose["body"]
@@ -683,33 +1132,251 @@ def _handle_send_email(session: dict, transcription: str) -> str:
     return "Something went wrong. Email compose reset. Please try again."
 
 
+# ── Telegram messaging handlers ───────────────────────────────────────────────
+
+def _handle_send_message(session: dict, transcription: str, eng_text: str = "") -> str:
+    """
+    Multi-step voice-guided Telegram message compose.
+
+    `transcription` — raw Whisper output in the user's language (used to
+                      capture recipient name and message body).
+    `eng_text`      — English-normalised version (used for confirm/cancel
+                      matching so native-language yes/no is recognised).
+    """
+    # Use English-normalised text for control words; fall back to transcription.
+    ctrl_lower = (eng_text or transcription).lower().strip()
+    lower      = transcription.lower().strip()
+    compose = session.get("msg_compose")
+
+    # Helper: check confirm/cancel in the session language as an offline fallback.
+    def _is_native_confirm() -> bool:
+        try:
+            from services.lang_utils import NATIVE_COMMANDS
+            lang = session.get("language", "en")
+            return any(p in ctrl_lower for p in NATIVE_COMMANDS.get(lang, {}).get("_confirm", []))
+        except Exception:
+            return False
+
+    def _is_native_cancel() -> bool:
+        try:
+            from services.lang_utils import NATIVE_COMMANDS
+            lang = session.get("language", "en")
+            return any(p in ctrl_lower for p in NATIVE_COMMANDS.get(lang, {}).get("_cancel", []))
+        except Exception:
+            return False
+
+    # Step 0 — start
+    if compose is None:
+        session["msg_compose"] = {"step": "to", "to": "", "text": ""}
+        session.modified = True
+        return (
+            "Sure! Let's send a Telegram message. "
+            "Who would you like to send it to? Say their name."
+        )
+
+    step = compose["step"]
+
+    # Step 1 — capture contact name → ask to confirm
+    if step == "to":
+        name = _normalize_contact_name(transcription)
+        session["msg_compose"] = dict(compose, to=name, step="to_confirm")
+        session.modified = True
+        return (
+            f"I heard {name}. "
+            f"Is that the correct recipient? Say yes to confirm, "
+            f"or say the correct name."
+        )
+
+    # Step 1b — confirm recipient
+    elif step == "to_confirm":
+        # Use ctrl_lower (English-normalised) so native confirmations work.
+        # Also check native phrases directly as offline fallback.
+        if _any_token_matches(ctrl_lower, _CONFIRM_EXACT) or _is_native_confirm():
+            # Confirmed — advance to message text
+            session["msg_compose"] = dict(compose, step="text")
+            session.modified = True
+            return (
+                f"Great! Sending to {compose['to']}. "
+                f"Now what would you like to say?"
+            )
+        else:
+            # User said a different name — treat this utterance as the corrected name
+            new_name = _normalize_contact_name(transcription)
+            session["msg_compose"] = dict(compose, to=new_name, step="to_confirm")
+            session.modified = True
+            return (
+                f"Got it. I heard {new_name}. "
+                f"Is that the correct recipient? Say yes to confirm or say the correct name."
+            )
+
+    # Step 2 — message text
+    elif step == "text":
+        text = transcription.strip()
+        session["msg_compose"] = dict(compose, text=text, step="confirm")
+        session.modified = True
+        return (
+            f"Ready to send to {compose['to']}. "
+            f"Message: {text}. "
+            f"Say yes to send, or say cancel to stop."
+        )
+
+    # Step 3 — confirm
+    elif step == "confirm":
+        # Use ctrl_lower (English-normalised) so native confirmations work.
+        # Also check native phrases directly as offline fallback.
+        if _any_token_matches(ctrl_lower, _CONFIRM_EXACT) or _is_native_confirm():
+            to   = compose["to"]
+            text = compose["text"]
+            session.pop("msg_compose", None)
+            session.modified = True
+            result = tg_send(to, text)
+            if result.get("success"):
+                return f"Message sent to {to} via Telegram!"
+            else:
+                return f"Could not send message. {result.get('message', '')}"
+        else:
+            session.pop("msg_compose", None)
+            session.modified = True
+            return "Message cancelled. What else can I help you with?"
+
+    session.pop("msg_compose", None)
+    return "Something went wrong. Message compose reset. Please try again."
+
+
+def _handle_cancel_message(session: dict) -> str:
+    session.pop("msg_compose", None)
+    session.modified = True
+    return "Message cancelled. What else can I help you with?"
+
+
+def _handle_read_messages(session: dict) -> str:
+    """Read the latest Telegram messages by voice."""
+    result = tg_all()
+    msgs = result.get("messages", [])
+    if not msgs:
+        return "You have no new Telegram messages."
+    lines = []
+    for m in msgs[-5:]:   # speak up to 5 most recent
+        sender  = _tts_safe(m.get("sender", "Unknown"))
+        text    = _tts_safe(m.get("text",   ""))
+        lines.append(f"From {sender}: {text}.")
+    intro = f"You have {len(msgs)} message{'s' if len(msgs) > 1 else ''}. "
+    return intro + " ".join(lines)
+
+
 def _handle_logout() -> str:
     return "You have been logged out. Goodbye!"
+
 
 
 def _handle_help() -> str:
     return (
         "You can say: "
-        "Read emails — to hear your inbox summary. "
+        "Read emails — to hear your inbox. "
+        "Summarize email — to get a quick summary of the current email. "
         "Next — to move to the next email. "
         "Previous — to go back. "
-        "Read more — to hear the rest of a long email. "
-        "Read email 2 — to jump to a specific email. "
+        "Read more — to hear more of a long email. "
+        "Read email two — to jump to a specific email. "
         "Send email — to compose a new email. "
         "Stop — to interrupt me while I am speaking. "
+        "Send message — to compose a Telegram message. "
+        "Read messages — to hear your latest Telegram messages. "
+        "Summarize messages — to get a summary of recent Telegram messages. "
+        "Switch service — to toggle between Email and Telegram mode. "
         "Logout — to sign out."
     )
 
 
-def _handle_unknown(text: str) -> str:
+def _handle_unknown(text: str, session: dict | None = None) -> str:
     if not text:
-        # Silence / nothing transcribed — return empty so no TTS fires
         return ""
-    return f"I heard: {text}. I am not sure what you want. Try saying read email or send email."
+    # Give a hint that matches the active service so the user knows what to say
+    active = (session or {}).get("active_service")
+    if active == "telegram":
+        hint = "Try saying: send message, read messages, or summarize messages."
+    elif active == "email":
+        hint = "Try saying: read emails, send email, next, previous, or summarize email."
+    else:
+        hint = "Try saying: Email to check your inbox, or Telegram for chat messages."
+    return f"I heard: {text}. I am not sure what you want. {hint}"
 
 
 # ── Main entry point ───────────────────────────────────────────────────────────
-def process_voice_command(audio_file: FileStorage, session: dict) -> dict:
+def _handle_service_choice(eng_text: str, orig_transcription: str, session: dict) -> dict:
+    """
+    Called when the user is responding to the 'which service — Email or Telegram?' prompt.
+    
+    `eng_text`          — English-normalised Whisper transcription (for keyword matching)
+    `orig_transcription`— original Whisper output in the user's language (shown in UI)
+    Returns the same dict shape as process_voice_command.
+    """
+    t = eng_text.lower()
+    if any(w in t for w in ["telegram", "chat", "whatsapp", "msg", "message", "messaging", "text"]):
+        service = "telegram"
+        resp = (
+            "Telegram mode activated. "
+            "Say send message to compose, or read messages to hear your latest messages."
+        )
+    elif any(w in t for w in ["email", "mail", "gmail", "inbox", "e-mail"]):
+        service = "email"
+        resp = (
+            "Email mode activated. "
+            "Say read emails to check your inbox, or send email to compose a new one."
+        )
+    else:
+        service = None
+        resp = "Sorry, I didn't catch that. Please say Email for your inbox, or Telegram for chat."
+
+    session["active_service"] = service
+    session.modified = True
+
+    # ── TTS: translate response to user's language, then speak with multilang engine ──
+    audio_url = None
+    from services.lang_utils import translate_text, speak_multilang
+    tts_lang = session.get("language", "en")
+    tts_text = translate_text(resp, tts_lang)
+    tts_path = speak_multilang(tts_text, tts_lang)
+    if tts_path:
+        audio_url = f"/static/audio/{os.path.basename(tts_path)}"
+
+    return {
+        "transcription":  orig_transcription,   # show original language to user
+        "intent":         "service_selected" if service else "choosing_service",
+        "service":        service,
+        "response_text":  tts_text or resp,     # show translated text in UI
+        "audio_url":      audio_url,
+        "email_step":     None,
+        "msg_step":       None,
+        "voice_lang":     tts_lang,
+    }
+
+
+def _handle_switch_service(session: dict) -> str:
+    """Clears the active service so the user is asked again on next mic tap."""
+    session.pop("active_service", None)
+    session.pop("email_compose", None)
+    session.pop("msg_compose", None)
+    session.modified = True
+    return "Service reset. Tap the microphone and say Email or Telegram to choose again."
+
+
+def _handle_set_language(session: dict) -> str:
+    """
+    Switch the active voice language.
+    The language code to apply is already in session["_set_lang_code"]
+    (set by _detect_intent before routing here).
+    Returns the confirmation phrase in the TARGET language so it is spoken
+    correctly — do NOT run this return value through translate_text.
+    """
+    from services.lang_utils import SWITCH_PHRASES
+    lang = session.pop("_set_lang_code", "en") or "en"
+    session["language"] = lang
+    session.modified = True
+    return SWITCH_PHRASES.get(lang, f"Language switched to {lang}.")
+
+
+def process_voice_command(audio_file: FileStorage, session: dict, choosing_service: bool = False) -> dict:
     """
     Accepts a Werkzeug FileStorage WAV upload, transcribes it,
     detects intent, generates a spoken response, and returns a dict:
@@ -737,33 +1404,70 @@ def process_voice_command(audio_file: FileStorage, session: dict) -> dict:
             "audio_url": audio_url,
         }
 
-    # 2 — Transcribe
-    transcription = transcribe(temp_path)
-    logger.info("Transcription: %r", transcription)
+    # 2 — Transcribe (pass session language so Whisper focuses on the right script)
+    stt_lang = session.get("language", "en")
+    transcription = transcribe(temp_path, language=stt_lang)
+    logger.info("Transcription (%s): %r", stt_lang, transcription)
 
-    # 3 — Detect intent (context-aware: checks session for active email compose)
-    intent = _detect_intent(transcription, session)
+    # 2.1 — Normalise to English for intent detection.
+    # Whisper transcribes in the chosen language (Hindi → Devanagari, etc.).
+    # Translating to English first lets all existing keyword/regex tables work
+    # without change, regardless of which language the user speaks.
+    if stt_lang != "en" and transcription.strip():
+        from services.lang_utils import translate_to_english
+        eng_text = translate_to_english(transcription, stt_lang)
+        logger.info("English normalised text: %r", eng_text)
+    else:
+        eng_text = transcription
+
+    # 2.5 — Service-selection shortcut (user is answering "Email or Telegram?")
+    if choosing_service:
+        result = _handle_service_choice(eng_text, transcription, session)
+        try:
+            os.remove(temp_path)
+        except OSError:
+            pass
+        return result
+
+    # 3 — Detect intent using English-normalised text (works for all languages)
+    intent = _detect_intent(eng_text, session)
 
     # 4 — Execute intent
     intent_map = {
-        "list_emails":  lambda: _handle_list_emails(session),
-        "read_email":   lambda: _handle_read_email(session),
-        "next_email":   lambda: _handle_next_email(session),
-        "prev_email":   lambda: _handle_prev_email(session),
-        "read_more":    lambda: _handle_read_more(session),
-        "send_email":   lambda: _handle_send_email(session, transcription),
-        "stop_reading": _handle_stop_reading,
-        "cancel_email": lambda: _handle_cancel_email(session),
-        "logout":       _handle_logout,
-        "help":         _handle_help,
-        "unknown":      lambda: _handle_unknown(transcription),
+        "list_emails":       lambda: _handle_list_emails(session),
+        "read_email":        lambda: _handle_read_email(session),
+        "next_email":        lambda: _handle_next_email(session),
+        "prev_email":        lambda: _handle_prev_email(session),
+        "read_more":         lambda: _handle_read_more(session),
+        "send_email":        lambda: _handle_send_email(session, transcription, eng_text),
+        "stop_reading":      _handle_stop_reading,
+        "cancel_email":      lambda: _handle_cancel_email(session),
+        "summarize_email":   lambda: _handle_summarize_email(session),
+        "send_message":      lambda: _handle_send_message(session, transcription, eng_text),
+        "read_messages":     lambda: _handle_read_messages(session),
+        "cancel_message":    lambda: _handle_cancel_message(session),
+        "summarize_message": lambda: _handle_summarize_message(session),
+        "switch_service":    lambda: _handle_switch_service(session),
+        "set_language":      lambda: _handle_set_language(session),
+        "logout":            _handle_logout,
+        "help":              _handle_help,
+        "unknown":           lambda: _handle_unknown(transcription, session),
     }
     response_text = intent_map.get(intent, lambda: _handle_unknown(transcription))()
 
     # 5 — TTS (skip if response is empty, e.g. stop_reading)
+    # For set_language the response is already in the target language (no translation needed).
+    # For all other intents, translate the English response into the session language.
     audio_url = None
+    tts_text = ""
     if response_text:
-        tts_path = speak_to_file(response_text)
+        from services.lang_utils import translate_text, speak_multilang
+        tts_lang = session.get("language", "en")
+        if intent == "set_language":
+            tts_text = response_text          # already in target language
+        else:
+            tts_text = translate_text(response_text, tts_lang)
+        tts_path = speak_multilang(tts_text, tts_lang)
         if tts_path:
             audio_url = f"/static/audio/{os.path.basename(tts_path)}"
 
@@ -776,10 +1480,13 @@ def process_voice_command(audio_file: FileStorage, session: dict) -> dict:
     return {
         "transcription": transcription,
         "intent":        intent,
-        "response_text": response_text,
+        "response_text": tts_text or response_text,   # show translated text in UI
         "audio_url":     audio_url,
+        "service":       session.get("active_service"),
+        "voice_lang":    session.get("language", "en"),   # active language code for JS
         # Tells the frontend which compose step we are on (or null)
         "email_step":    (session.get("email_compose") or {}).get("step"),
+        "msg_step":      (session.get("msg_compose")   or {}).get("step"),
     }
 
 
@@ -825,7 +1532,7 @@ def process_text_compose_input(field: str, value: str, session: dict) -> dict:
         readable_to = to.replace("@", " at ").replace(".", " dot ")
         response_text = (
             f"Ready to send. To: {readable_to}. Subject: {subject}. "
-            f"Message: {value}. Say yes to confirm or cancel to abort."
+            f"Message: {value}. Say yes to confirm, or say cancel to stop."
         )
 
     elif field == "confirm":
@@ -861,4 +1568,86 @@ def process_text_compose_input(field: str, value: str, session: dict) -> dict:
         "response_text": response_text,
         "audio_url":     audio_url,
         "email_step":    (session.get("email_compose") or {}).get("step"),
+    }
+
+
+def process_text_msg_input(field: str, value: str, session: dict) -> dict:
+    """
+    Accepts a typed value for the active Telegram message compose step.
+    Returns the same dict shape as process_voice_command.
+    """
+    compose = session.get("msg_compose")
+    if compose is None:
+        session["msg_compose"] = {"step": "to", "to": "", "text": ""}
+        session.modified = True
+        compose = session["msg_compose"]
+
+    response_text = ""
+
+    if field == "to":
+        name = _normalize_contact_name(value)
+        session["msg_compose"] = dict(compose, to=name, step="to_confirm")
+        session.modified = True
+        response_text = (
+            f"I have {name} as the recipient. "
+            f"Type YES to confirm or type a different name."
+        )
+
+    elif field == "to_confirm":
+        if re.match(r'^(yes|y|confirm|ok|okay|correct|right|yep|yeah)$', value.strip(), re.I):
+            session["msg_compose"] = dict(compose, step="text")
+            session.modified = True
+            response_text = (
+                f"Recipient confirmed: {compose.get('to', '')}. "
+                f"Now type your message."
+            )
+        else:
+            new_name = _normalize_contact_name(value)
+            session["msg_compose"] = dict(compose, to=new_name, step="to_confirm")
+            session.modified = True
+            response_text = (
+                f"Updated to {new_name}. "
+                f"Type YES to confirm or type a different name."
+            )
+
+    elif field == "text":
+        text = value.strip()
+        to   = compose.get("to", "")
+        session["msg_compose"] = dict(compose, text=text, step="confirm")
+        session.modified = True
+        response_text = (
+            f"Ready to send to {to}. "
+            f"Message: {text}. Say yes or type YES to confirm, or say cancel to stop."
+        )
+
+    elif field == "confirm":
+        to   = compose.get("to", "")
+        text = compose.get("text", "")
+        session.pop("msg_compose", None)
+        session.modified = True
+        try:
+            result = tg_send(to, text)
+            if result.get("success"):
+                response_text = f"Telegram message sent to {to}!"
+            else:
+                response_text = f"Could not send. {result.get('message', '')}. Please try again."
+        except Exception as exc:
+            logger.error("Text msg send error: %s", exc)
+            response_text = "Sorry, I could not send the message. Please try again."
+
+    else:
+        response_text = "Unknown field."
+
+    audio_url = None
+    if response_text:
+        tts_path = speak_to_file(response_text)
+        if tts_path:
+            audio_url = f"/static/audio/{os.path.basename(tts_path)}"
+
+    return {
+        "transcription": f"[typed] {value}",
+        "intent":        "send_message",
+        "response_text": response_text,
+        "audio_url":     audio_url,
+        "msg_step":      (session.get("msg_compose") or {}).get("step"),
     }

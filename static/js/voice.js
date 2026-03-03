@@ -25,12 +25,28 @@ let recordTimeout   = null;
 let isSpeaking      = false;   // true while TTS audio is playing
 let _ttsAudio       = null;    // reference to current <audio> element
 let _emailStep      = null;    // current step of voice-guided email compose (or null)
-let _wsRecog        = null;    // Web Speech API recognizer used during TTS playback
+let _msgStep         = null;    // current step of voice-guided Telegram message compose
+let _activeService   = null;    // 'email' | 'telegram' | null — chosen by user at first tap
+let _choosingService = false;   // true while waiting for user to say which service
+let _wsRecog         = null;    // Web Speech API recognizer used during TTS playback
+// Initialize from localStorage immediately so the FIRST request already uses
+// the stored language — not hardcoded 'en'.  Falls back to 'en' if not set.
+let _voiceLang       = localStorage.getItem('voicemail_lang') || 'en';
+
+// Expose setter so dashboard inline script can sync after dropdown change
+function _setVoiceLang(lang) { _voiceLang = lang || 'en'; }
 
 const TARGET_SAMPLE_RATE = 16000;   // Whisper requirement
-const MAX_RECORD_SECONDS = 12;       // default listen window (seconds)
-const EMAIL_LISTEN_SECS  = 15;       // longer window after email reading
+const MAX_RECORD_SECONDS = 8;        // max listen window (seconds) — hard cap
+const EMAIL_LISTEN_SECS  = 10;       // longer window after email reading
 const BUFFER_SIZE        = 4096;
+
+// ── Silence-gate: stop recording automatically after N ms of silence ─────────
+// This prevents sending 8-10 s of dead air to Whisper, cutting latency by ~5×.
+const SILENCE_THRESHOLD_RMS = 0.008; // RMS below this = silence (0-1 float32 scale)
+const SILENCE_STOP_MS       = 1500;  // stop if silence lasts this long AFTER speech
+let   _hadSpeech             = false; // true once we've seen at least one voiced frame
+let   _silenceTimer          = null;  // setTimeout handle for auto-stop
 
 let _lastIntent = null;              // tracks last server-returned intent
 
@@ -41,7 +57,30 @@ const $ = id => document.getElementById(id);
 async function toggleRecording() {
   // If AI is speaking, stop it — stopSpeaking() will auto-restart recording
   if (isSpeaking) { stopSpeaking(); return; }
-  isRecording ? stopRecording() : await startRecording();
+  if (isRecording) { stopRecording(); return; }
+
+  // ── First tap (no service chosen yet) — ask Email or Telegram ─────────────
+  if (!_activeService && !_choosingService) {
+    _choosingService = true;
+    _updateServiceBadge();
+    setStatus('🎤 Which service? Say "Email" or "Telegram"', 'idle');
+    try {
+      const res  = await fetch('/voice/service-greeting');
+      const data = await res.json();
+      $('responseText').textContent = data.response_text || '';
+      // Sync the active voice language from the greeting response so the
+      // Web Speech API watcher (used during TTS playback) also uses the
+      // correct language immediately.
+      if (data.voice_lang) _voiceLang = data.voice_lang;
+      if (data.audio_url) {
+        // TTS ends → _autoRestart → user speaks → processAndSend sends choosing_service=true
+        playTTS(data.audio_url);
+        return;
+      }
+    } catch (e) { /* network error — fall through and start mic directly */ }
+  }
+
+  await startRecording();
 }
 
 // ── Initialise AudioContext (called once from first user gesture) ─────────────
@@ -99,6 +138,8 @@ async function startRecording() {
   }
 
   pcmBuffers = [];
+  _hadSpeech  = false;
+  if (_silenceTimer) { clearTimeout(_silenceTimer); _silenceTimer = null; }
 
   // Fresh ScriptProcessor each recording (they can't be reused across recordings)
   if (scriptProcessor) { scriptProcessor.disconnect(); scriptProcessor = null; }
@@ -111,6 +152,26 @@ async function startRecording() {
     if (!isRecording) return;
     const samples = event.inputBuffer.getChannelData(0);
     pcmBuffers.push(new Float32Array(samples));
+
+    // ── Silence gate ──────────────────────────────────────────────────────────
+    // Compute RMS of this buffer chunk
+    let sum = 0;
+    for (let i = 0; i < samples.length; i++) sum += samples[i] * samples[i];
+    const rms = Math.sqrt(sum / samples.length);
+
+    if (rms > SILENCE_THRESHOLD_RMS) {
+      // Voiced frame — cancel any pending silence timer
+      _hadSpeech = true;
+      if (_silenceTimer) { clearTimeout(_silenceTimer); _silenceTimer = null; }
+    } else if (_hadSpeech) {
+      // Silence after speech — start the auto-stop countdown (if not already running)
+      if (!_silenceTimer) {
+        _silenceTimer = setTimeout(() => {
+          _silenceTimer = null;
+          if (isRecording) stopRecording();
+        }, SILENCE_STOP_MS);
+      }
+    }
   };
 
   micSource.connect(scriptProcessor);
@@ -118,8 +179,8 @@ async function startRecording() {
 
   isRecording   = true;
   setRecordingUI(true);
-  // Use a longer window when the user just heard an email chunk
-  const _emailReadIntents = new Set(['read_email','next_email','prev_email','read_more','list_emails']);
+  // Use a longer window when the user just heard an email chunk or summary
+  const _emailReadIntents = new Set(['read_email','next_email','prev_email','read_more','list_emails','summarize_email']);
   const listenSecs = _emailReadIntents.has(_lastIntent) ? EMAIL_LISTEN_SECS : MAX_RECORD_SECONDS;
   recordTimeout = setTimeout(stopRecording, listenSecs * 1000);
 }
@@ -128,6 +189,7 @@ async function startRecording() {
 function stopRecording() {
   if (!isRecording) return;
   clearTimeout(recordTimeout);
+  if (_silenceTimer) { clearTimeout(_silenceTimer); _silenceTimer = null; }
   isRecording = false;
   setRecordingUI(false);
 
@@ -170,6 +232,10 @@ async function processAndSend(buffers) {
   // Send
   const form = new FormData();
   form.append('audio', wavBlob, 'recording.wav');
+  if (_choosingService) form.append('choosing_service', 'true');
+  // Always send the current UI language so the server uses it for STT + TTS
+  // even if the Flask session cookie hasn't been refreshed yet.
+  form.append('lang', localStorage.getItem('voicemail_lang') || 'en');
 
   try {
     const res  = await fetch('/voice/process', { method: 'POST', body: form });
@@ -186,10 +252,46 @@ async function processAndSend(buffers) {
 
     // ── Track last intent (used for dynamic listen-window) ────────────────────
     _lastIntent = data.intent || null;
+    // ── Language switch: sync client-side language state ───────────────────────
+    if (data.voice_lang) {
+      _voiceLang = data.voice_lang;
+      // Sync the dropdown (covers voice-command switch too)
+      const sel = document.getElementById('langSelect');
+      if (sel) sel.value = data.voice_lang;
+    }
+    // ── Service selection / switch result ────────────────────────────────
+    if (data.intent === 'service_selected') {
+      _activeService   = data.service || null;
+      _choosingService = false;
+      _updateServiceBadge();
+      if (_activeService === 'telegram' && typeof switchTab === 'function') switchTab('messages');
+      if (_activeService === 'email'    && typeof switchTab === 'function') switchTab('email');
+    } else if (data.intent === 'switch_service') {
+      _activeService   = null;
+      _choosingService = false;
+      _updateServiceBadge();
+    } else if (data.intent === 'choosing_service') {
+      // service word not recognised — stay in choosing mode, play TTS re-prompt
+      _choosingService = true;
+      _updateServiceBadge();
+    }
+
+    // ── Auto-switch to Messages tab for Telegram intents ─────────────────────
+    if (['send_message','read_messages','cancel_message','summarize_message'].includes(data.intent)) {
+      if (typeof switchTab === 'function') switchTab('messages');
+    }
+    // Auto-switch to Email tab for email intents (when switching back)
+    if (['read_email','list_emails','send_email','summarize_email'].includes(data.intent)) {
+      if (typeof switchTab === 'function') switchTab('email');
+    }
 
     // ── Track email compose step ──────────────────────────────────────────────
     _emailStep = data.email_step || null;
     _updateTypeInBox();
+
+    // ── Track Telegram message compose step ───────────────────────────────────
+    _msgStep = data.msg_step || null;
+    _updateMsgTypeInBox();
 
     // ── Handle special intents ────────────────────────────────────────────────
     if (data.intent === 'stop_reading') {
@@ -216,14 +318,31 @@ async function processAndSend(buffers) {
     }
 
     // ── Show compose step label or generic done status ────────────────────────
-    const stepLabels = {
-      to:      '📧 Step 1/4 · Say the e-mail address — or type it in the box below',
-      subject: '📝 Step 2/4 · Say the subject (or type below)',
-      body:    '💬 Step 3/4 · Say your message (or type below)',
-      confirm: '✅ Step 4/4 · Say “yes” to send · “cancel” to abort',
+    const emailStepLabels = {
+      to:      '📧 E-mail Step 1/4 · Say the address — or type it below',
+      subject: '📝 E-mail Step 2/4 · Say the subject (or type below)',
+      body:    '💬 E-mail Step 3/4 · Say your message (or type below)',
+      confirm: '✅ E-mail Step 4/4 · Say "yes" to send · "cancel" to abort',
     };
-    const statusMsg = _emailStep ? stepLabels[_emailStep] : ('Done • ' + (data.intent || '—'));
-    setStatus(statusMsg, _emailStep ? 'recording' : 'done');
+    const msgStepLabels2 = {
+      to:         '👤 Telegram Step 1/4 · Say the contact name (or type below)',
+      to_confirm: '❓ Telegram Step 2/4 · Say "yes" to confirm · or say the correct name',
+      text:       '💬 Telegram Step 3/4 · Say your message (or type below)',
+      confirm:    '✅ Telegram Step 4/4 · Say "yes" to send · "cancel" to abort',
+    };
+    const intentLabels = {
+      summarize_email:   '📋 Summary ready · Say "next", "summarize email" or "send email"',
+      summarize_message: '📋 Message summary ready · Say a command',
+      read_email:        '📧 Email read · Say "next", "summarize email" or "read more"',
+      list_emails:       '📬 Inbox listed · Say "read email 1" or "next"',
+      read_messages:     '💬 Messages read · Say "summarize messages" or "send message"',
+    };
+    const activeStep   = _emailStep || _msgStep;
+    const activeLabels = _emailStep ? emailStepLabels : (_msgStep ? msgStepLabels2 : {});
+    const statusMsg    = activeStep
+      ? (activeLabels[activeStep] || activeStep)
+      : (intentLabels[data.intent] || ('Done • ' + (data.intent || '—')));
+    setStatus(statusMsg, activeStep ? 'recording' : 'done');
 
     if (data.audio_url) {
       // playTTS → onended already calls _autoRestart, so we're covered
@@ -299,7 +418,8 @@ function _startSpeechWatcher() {
   _stopSpeechWatcher();   // kill any previous instance
 
   const recog = new SR();
-  recog.lang            = 'en-US';
+  const _langMap = { 'en': 'en-US', 'hi': 'hi-IN', 'mr': 'mr-IN' };
+  recog.lang            = _langMap[_voiceLang] || 'en-US';
   recog.continuous      = true;
   recog.interimResults  = true;   // fire on partial results for fastest response
   recog.maxAlternatives = 3;
@@ -361,10 +481,13 @@ function playTTS(url) {
     _ttsAudio = null;
     _stopSpeechWatcher();
     _setSpeakingUI(false);
-    // Show a contextual hint after email reading TTS
-    const _emailReadIntents = new Set(['read_email','next_email','prev_email','read_more','list_emails']);
+    // Show a contextual hint after TTS playback
+    const _emailReadIntents = new Set(['read_email','next_email','prev_email','read_more','list_emails','summarize_email']);
+    const _msgIntents       = new Set(['send_message','read_messages','cancel_message','summarize_message']);
     if (_emailReadIntents.has(_lastIntent)) {
-      setStatus('🎤 Say "read more", "next email", "previous" or "stop reading"', 'idle');
+      setStatus('🎤 Say "summarize email", "read more", "next", "previous" or "stop"', 'idle');
+    } else if (_msgIntents.has(_lastIntent)) {
+      setStatus('🎤 Say "send message", "read messages" or "summarize messages"', 'idle');
     } else {
       setStatus('🎤 Listening…', 'idle');
     }
@@ -473,7 +596,24 @@ function _updateTypeInBox() {
     input.value = '';
   }
 }
-
+function _updateMsgTypeInBox() {
+  const box   = $('msgTypeInBox');
+  const input = $('msgTypeInInput');
+  if (!box) return;
+  if (_msgStep) {
+    const placeholders = {
+      to:         'Contact name (e.g. Vaibhav)',
+      to_confirm: 'Type YES to confirm or type a different name',
+      text:       'Your message\u2026',
+      confirm:    'Type YES to send or NO to cancel',
+    };
+    input.placeholder = placeholders[_msgStep] || '';
+    box.classList.remove('hidden');
+  } else {
+    box.classList.add('hidden');
+    input.value = '';
+  }
+}
 async function submitTypeIn() {
   const input = $('typeInInput');
   const value = (input.value || '').trim();
@@ -519,21 +659,92 @@ function dismissTypeIn() {
   $('typeInInput').value = '';
 }
 
+async function submitMsgTypeIn() {
+  const input = $('msgTypeInInput');
+  const value = (input.value || '').trim();
+  if (!value) return;
+
+  const field = _msgStep;
+  if (!field) return;
+
+  // to_confirm step: handle locally for the "no" / re-enter case
+  // ("yes" sends to server normally)
+  if (field === 'confirm') {
+    if (/^(no|n|cancel|abort|stop|quit)/i.test(value)) {
+      _msgStep = null;
+      _updateMsgTypeInBox();
+      setStatus('Telegram message cancelled \u00B7 Ready to listen', 'idle');
+      _autoRestart(300);
+      return;
+    }
+    if (!/^(yes|y|confirm|ok|okay|send|go)/i.test(value)) {
+      $('responseText').textContent = 'Type YES to send or NO to cancel.';
+      return;
+    }
+  }
+
+  setStatus('Processing\u2026', 'processing');
+  $('msgTypeInBox').classList.add('hidden');
+
+  try {
+    const res  = await fetch('/voice/msg-compose-text', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ field, value }),
+    });
+    const data = await res.json();
+    $('transcriptionText').textContent = data.transcription || '(typed)';
+    $('responseText').textContent      = data.response_text || '';
+    _msgStep = data.msg_step || null;
+    _updateMsgTypeInBox();
+    const msgStepLabels = {
+      to:         '\uD83D\uDC64 Telegram Step 1/4 \u00B7 Contact name (or type below)',
+      to_confirm: '\u2753 Telegram Step 2/4 \u00B7 Say "yes" to confirm \u00B7 or type the correct name',
+      text:       '\uD83D\uDCAC Telegram Step 3/4 \u00B7 Your message (or type below)',
+      confirm:    '\u2705 Telegram Step 4/4 \u00B7 Say "yes" to send \u00B7 "cancel" to abort',
+    };
+    const statusMsg = _msgStep ? (msgStepLabels[_msgStep] || _msgStep) : ('Done \u2022 send_message');
+    setStatus(statusMsg, _msgStep ? 'recording' : 'done');
+    if (data.audio_url) playTTS(data.audio_url);
+    else _autoRestart(600);
+  } catch (err) {
+    setStatus('Network error: ' + err.message, 'error');
+    _autoRestart(1500);
+  }
+}
+
+function dismissMsgTypeIn() {
+  $('msgTypeInBox').classList.add('hidden');
+  $('msgTypeInInput').value = '';
+}
+
 // Shared handler for both voice and text-input compose responses
 function _handleComposeResponse(data) {
   $('transcriptionText').textContent = data.transcription || '(typed)';
   $('responseText').textContent      = data.response_text || '';
   _emailStep = data.email_step || null;
   _updateTypeInBox();
+  _msgStep = data.msg_step || null;
+  _updateMsgTypeInBox();
 
-  const stepLabels = {
-    to:      '📧 Step 1/4 · Say the e-mail address — or type it in the box below',
-    subject: '📝 Step 2/4 · Say the subject (or type below)',
-    body:    '💬 Step 3/4 · Say your message (or type below)',
-    confirm: '✅ Step 4/4 · Say "yes" to send · "cancel" to abort',
+  const emailStepLabels3 = {
+    to:      '📧 E-mail Step 1/4 · Say the address — or type it below',
+    subject: '📝 E-mail Step 2/4 · Say the subject (or type below)',
+    body:    '💬 E-mail Step 3/4 · Say your message (or type below)',
+    confirm: '✅ E-mail Step 4/4 · Say "yes" to send · "cancel" to abort',
   };
-  const statusMsg = _emailStep ? stepLabels[_emailStep] : ('Done • ' + (data.intent || '—'));
-  setStatus(statusMsg, _emailStep ? 'recording' : 'done');
+  const msgStepLabels3 = {
+    to:         '👤 Telegram Step 1/4 · Contact name (or type below)',
+    to_confirm: '❓ Telegram Step 2/4 · Say "yes" to confirm · or type the correct name',
+    text:       '💬 Telegram Step 3/4 · Your message (or type below)',
+    confirm:    '✅ Telegram Step 4/4 · Say "yes" to send · "cancel" to abort',
+  };
+  const activeStep3   = _emailStep || _msgStep;
+  const activeLabels3 = _emailStep ? emailStepLabels3 : (_msgStep ? msgStepLabels3 : {});
+  const statusMsg     = activeStep3
+    ? (activeLabels3[activeStep3] || activeStep3)
+    : ('Done • ' + (data.intent || '—'));
+  setStatus(statusMsg, activeStep3 ? 'recording' : 'done');
 
   if (data.audio_url) {
     playTTS(data.audio_url);
@@ -541,6 +752,41 @@ function _handleComposeResponse(data) {
     _autoRestart(600);
   }
 }
+
+// ── Service badge ───────────────────────────────────────────────────────────────
+function _updateServiceBadge() {
+  const badge     = $('serviceBadge');
+  const switchBtn = $('switchServiceBtn');
+  if (!badge) return;
+  const svc = window._svcI18n || {};
+  if (!_activeService) {
+    badge.textContent = _choosingService
+      ? (svc.svcWaiting   || 'Waiting for choice…')
+      : (svc.svcTapMic    || '🤖 Tap mic to start');
+    badge.className   = 'px-3 py-1 rounded-full text-xs font-semibold bg-white/10 text-gray-400 text-center block';
+    if (switchBtn) switchBtn.classList.add('hidden');
+  } else if (_activeService === 'email') {
+    badge.textContent = svc.svcEmail    || '📧 Email Mode';
+    badge.className   = 'px-3 py-1 rounded-full text-xs font-semibold bg-purple-500/30 text-purple-300 text-center block';
+    if (switchBtn) { switchBtn.textContent = svc.svcSwitch || '↺ Switch service'; switchBtn.classList.remove('hidden'); }
+  } else {
+    badge.textContent = svc.svcTelegram || '💬 Telegram Mode';
+    badge.className   = 'px-3 py-1 rounded-full text-xs font-semibold bg-green-500/30 text-green-300 text-center block';
+    if (switchBtn) { switchBtn.textContent = svc.svcSwitch || '↺ Switch service'; switchBtn.classList.remove('hidden'); }
+  }
+}
+
+function resetService() {
+  _activeService   = null;
+  _choosingService = false;
+  _updateServiceBadge();
+  setStatus('Tap 🎤 to choose a service', 'idle');
+  const svc = window._svcI18n || {};
+  $('responseText').textContent = svc.svcReset || 'Service reset. Tap the mic and say Email or Telegram.';
+}
+
+// ── Initialise badge on page load ────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', _updateServiceBadge);
 
 // Release mic tracks when page closes / navigates away
 window.addEventListener('beforeunload', _releaseMic);
