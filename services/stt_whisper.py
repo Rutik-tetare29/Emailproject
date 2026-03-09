@@ -38,21 +38,65 @@ except Exception as exc:
     logger.error("Failed to load Whisper model '%s': %s", _model_name, exc)
 
 
-# ── Prompt — guides Whisper toward email + Telegram command vocabulary ──────────
+# ── Prompt — guides Whisper toward command vocabulary ───────────────────────────
+# IMPORTANT: Keep this short and keyword-only.
+# Long descriptive sentences (especially with "at", "dot", "com") are hallucinated
+# verbatim by Whisper when the mic audio is unclear or near-silent.
+# Domain names (gmail, hotmail, etc.) and example addresses must NOT appear
+# in the prompt.  Whisper treats the prompt as a prefix and will hallucinate
+# the very next word it sees after a contact name, e.g.
+#   user says "Pooja" → Whisper outputs "Pooja gmail hotmail"
+# because those words immediately follow "Pooja" in the prompt string.
 _PROMPT = (
-    "Voice assistant for email and Telegram messaging. "
-    "Email commands: read email, send email, next email, previous email, logout, help, stop, cancel. "
-    "Telegram commands: send message, read messages. "
-    "Contact names: Rutik, Vaibhav, Rahul, Priya, Amit, Neha, Pooja, Raj, Ankit, Deepak. "
-    "Common words: yes, no, confirm, cancel, compose, subject, body, message, recipient. "
-    "Email addresses like user at gmail dot com."
+    "read email send email next previous list summarize "
+    "send message read messages yes no confirm cancel stop logout help"
 )
+
+# ── Substrings that indicate Whisper is echoing its own prompt (hallucination) ──
+# If the transcription contains any of these, it is prompt-echo and must be
+# discarded (return "") so the intent engine sees silence instead of gibberish.
+_HALLUCINATION_SUBSTRINGS: list[str] = [
+    "email addresses like",
+    "user at gmail",
+    "user123 at",
+    "gmail dot com",
+    "hotmail dot com",
+    "voice email and telegram",
+    "voice assistant for email",
+    "email compose steps",
+    "confirmation words",
+    "contact names",
+    "navigation:",
+    "commands:",
+    "summarize email, read messages",   # prompt sentence fragment
+    "read email, send email, next",     # prompt sentence fragment
+    # Prompt-echo patterns caused by having domain names in the old prompt
+    "gmail hotmail",
+    "hotmail gmail",
+    "pooja gmail",
+    "pooja hotmail",
+    "amit gmail",
+    "rahul gmail",
+    "neha gmail",
+    "priya gmail",
+    "rutik gmail",
+    "vaibhav gmail",
+]
+
+
+def _is_hallucination(text: str) -> bool:
+    """
+    Return True if `text` looks like Whisper echoing its own initial_prompt
+    rather than transcribing real speech.
+    """
+    lower = text.lower()
+    return any(sub in lower for sub in _HALLUCINATION_SUBSTRINGS)
 
 
 def _trim_silence(
     audio: np.ndarray,
     sr: int,
-    top_db: float = 40.0,
+    top_db: float = 25.0,
     frame_ms: int = 25,
     hop_ms: int = 10,
 ) -> np.ndarray:
@@ -61,8 +105,9 @@ def _trim_silence(
     RMS energy threshold (no librosa dependency required).
 
     top_db  — frames whose energy is more than `top_db` dB below the peak
-               frame are treated as silence.  40 dB is a good default for
-               typical voice recordings; lower = more aggressive trimming.
+               frame are treated as silence.  25 dB is conservative — only
+               removes near-total silence while preserving soft word onsets.
+               (40 dB was too aggressive and chopped off word beginnings.)
     """
     if len(audio) == 0:
         return audio
@@ -132,17 +177,26 @@ def transcribe(wav_path: str, language: str = "en") -> str:
         result = _model.transcribe(
             audio,
             language=language,
-            fp16=False,                       # False for CPU; True speeds up GPU
+            fp16=False,                          # False for CPU; True speeds up GPU
             initial_prompt=_PROMPT,
-            temperature=0.0,                  # greedy decoding — fastest & deterministic
-            beam_size=1,                      # greedy beam — eliminates 5× overhead
-            best_of=1,                        # no candidate sampling needed at temp=0
+            temperature=(0.0, 0.2, 0.4, 0.6),   # fallback temperatures if confidence low
+            beam_size=5,                         # beam search — significantly better accuracy
+            best_of=5,                           # pick best of 5 candidates at higher temps
             condition_on_previous_text=False,
-            no_speech_threshold=0.6,          # skip if Whisper is confident it's silence
-            compression_ratio_threshold=2.4,  # skip repetitive / garbage output
+            no_speech_threshold=0.4,             # was 0.6 — less likely to discard valid speech
+            compression_ratio_threshold=2.4,     # skip repetitive / garbage output
+            logprob_threshold=-1.0,              # retry with higher temp if avg log-prob too low
         )
 
         text = result.get("text", "").strip()
+
+        # ── Hallucination guard: reject prompt-echo ────────────────────────────
+        # Whisper sometimes copies its initial_prompt into the output when audio
+        # is unclear.  Detect and discard these to prevent false intent matches.
+        if _is_hallucination(text):
+            logger.warning("Whisper hallucination detected — discarding: %r", text)
+            return ""
+
         logger.info("Whisper transcription: %r", text)
         return text
 

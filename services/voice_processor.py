@@ -234,10 +234,17 @@ _STOP_EXACT = {
     "stop", "top", "stock", "shop", "cop", "drop", "prop",
     "stuff", "step", "stoop", "store", "stopped", "stopping",
     "stab", "stub", "spot", "stomp", "pause", "paws", "halt",
-    "quiet", "quite", "quite", "silence", "silent",
+    "quiet", "quite", "silence", "silent",
     "enough", "that's enough", "that is enough",
     "shut up", "be quiet", "stop it", "stop reading",
     "pause reading", "stop the email", "no more",
+    # Hindi romanized (Whisper output for रुको / बंद / चुप)
+    "ruko", "rukho", "ruk", "band karo", "bandh karo", "chup", "bas",
+    # Marathi romanized (थांब / बंद कर)
+    "thamba", "thaamb", "thab", "band kar",
+    # Spanish / French / German shortcuts
+    "para", "parar", "detente",
+    "arrêt", "stopp",
 }
 
 # ── Cancel signals ────────────────────────────────────────────────────────────
@@ -253,9 +260,10 @@ _CANCEL_EXACT = {
     "stop sending", "cancel email", "cancel sending", "cancel it",
 }
 
-# ── Explicit cancel signals (no ambiguous single words like "no", "not") ──────
-# Used at content-entry steps (to, subject, body, text) where user input is
-# expected — single words like "no" must NOT cancel the compose flow.
+# ── Explicit cancel signals ───────────────────────────────────────────────────
+# Used at CONFIRM / TO_CONFIRM steps where the user is expected to say
+# yes or no.  Fuzzy matching is acceptable there because the user is not
+# dictating free-form content.
 _EXPLICIT_CANCEL = {
     "cancel", "cancel email", "cancel message", "cancel sending",
     "cancel it", "cancel compose",
@@ -265,7 +273,55 @@ _EXPLICIT_CANCEL = {
     "forget it", "forget that",
     "don't send", "do not send", "don't do it",
     "stop sending", "exit compose", "stop composing", "quit compose",
+    "stop", "ruko", "rukho", "ruk",          # Hindi: रुको
+    "thamba", "thaamb", "thab",              # Marathi: थांब
+    "bando", "bandh", "band karo",           # Hindi: बंद करो
 }
+
+# ── Content-step cancel signals (EXACT-ONLY — NO fuzzy matching) ──────────────
+# Used when capturing free-form content: contact name, message body,
+# email address, subject, email body.
+# IMPORTANT: do NOT include short 3–4 char words here — they fuzzy-match
+# Indian names (e.g. "ruk" matches "Rutik" at ratio 0.75).
+_CONTENT_CANCEL = {
+    # Multi-word phrases are unambiguous — safe to keep
+    "cancel message", "cancel email", "cancel sending",
+    "cancel it", "cancel compose",
+    "stop sending", "exit compose", "stop composing", "quit compose",
+    "never mind", "nevermind", "never mine",
+    "forget it", "forget that",
+    "don't send", "do not send", "don't do it",
+    "band karo", "bandh karo",   # Hindi multi-word: बंद करो
+    # Single words that are ALWAYS cancel and can NEVER be a name or name fragment
+    "cancel", "cancelled", "cancelling",
+    "abort",
+    # NOTE: "stop", "ruko", "rukho", "thamba", "thaamb" are intentionally
+    # EXCLUDED here.  When Whisper mishears the name "Rutik" in Hindi mode it
+    # outputs "रुक" which translates to "stop" — keeping "stop" here would
+    # silently cancel every attempt to send a message to Rutik.
+    # To cancel during name/text capture the user must say "cancel" or a
+    # multi-word phrase above.
+}
+
+
+def _is_cancel_content(text: str) -> bool:
+    """
+    Exact-only cancel detection for content-capture steps.
+
+    Unlike _any_token_matches (which uses fuzzy similarity), this function
+    ONLY accepts exact string equality or exact substring for multi-word
+    phrases.  This prevents names like 'Rutik' from matching 'ruk'
+    (SequenceMatcher ratio 0.75 ≥ cutoff 0.72) and triggering a false cancel.
+    """
+    lower = text.lower().strip()
+    # 1. Exact full-phrase match (covers all single-word entries too)
+    if lower in _CONTENT_CANCEL:
+        return True
+    # 2. Multi-word phrases: safe to match as substrings
+    for phrase in _CONTENT_CANCEL:
+        if " " in phrase and phrase in lower:
+            return True
+    return False
 
 # ── Confirm signals ───────────────────────────────────────────────────────────
 # "yes" → yet, yes, yep, yeah, ya, yah, yea, jest, chest
@@ -454,15 +510,33 @@ def _detect_intent(text: str, session: dict) -> str:
     if not lower:
         return "unknown"
 
+    # ── Is the user currently dictating free-form content? ────────────────────
+    # During contact-name capture ("to"), message body ("text"), email subject
+    # ("subject"), email body ("body"), and email-address capture ("to" in email
+    # compose) common English words like "shop", "top", "drop", "step", "store",
+    # "cop" are VALID content — they must NOT trigger stop_reading.
+    _content_step = (
+        (session.get("msg_compose")   or {}).get("step") in ("to", "text")
+        or
+        (session.get("email_compose") or {}).get("step") in ("to", "subject", "body")
+    )
+
+    # ── GLOBAL PRIORITY: stop/pause wins — but NOT during free-form capture ───
+    # When capturing a Telegram contact name / message body or an email address /
+    # subject / body, we skip the broad stop-word set so the user can freely
+    # say names and sentences.  _EXPLICIT_CANCEL in each branch handles bail-out.
+    if not _content_step and _any_token_matches(lower, _STOP_EXACT):
+        return "stop_reading"
+
     # ── While message compose is active ──────────────────────────────────────
     # Each step has different cancel sensitivity to avoid false positives.
     if session.get("msg_compose"):
         step = session["msg_compose"].get("step")
 
         if step == "to":
-            # Capturing contact name: ONLY cancel on unambiguous explicit phrases.
-            # Single words like "no", "not", "nope" must NOT cancel here.
-            if _any_token_matches(lower, _EXPLICIT_CANCEL):
+            # Capturing contact name — use EXACT-ONLY cancel check so names
+            # like ‘Rutik’ don’t fuzzy-match ‘ruk’ and trigger a false cancel.
+            if _is_cancel_content(lower):
                 return "cancel_message"
             return "send_message"  # any utterance = contact name
 
@@ -476,8 +550,8 @@ def _detect_intent(text: str, session: dict) -> str:
             return "send_message"  # treat as corrected name
 
         elif step == "text":
-            # Capturing message body: ONLY cancel on explicit phrases.
-            if _any_token_matches(lower, _EXPLICIT_CANCEL):
+            # Capturing message body — use EXACT-ONLY cancel check.
+            if _is_cancel_content(lower):
                 return "cancel_message"
             return "send_message"  # any utterance = message content
 
@@ -491,7 +565,7 @@ def _detect_intent(text: str, session: dict) -> str:
 
         else:
             # Unknown step fallback
-            if _any_token_matches(lower, _EXPLICIT_CANCEL):
+            if _is_cancel_content(lower):
                 return "cancel_message"
             return "send_message"
 
@@ -500,20 +574,20 @@ def _detect_intent(text: str, session: dict) -> str:
         step = session["email_compose"].get("step")
 
         if step == "to":
-            # Capturing recipient address: only explicit cancel phrases cancel.
-            if _any_token_matches(lower, _EXPLICIT_CANCEL):
+            # Capturing recipient address — exact-only cancel.
+            if _is_cancel_content(lower):
                 return "cancel_email"
             return "send_email"
 
         elif step == "subject":
-            # Capturing subject: only explicit cancel.
-            if _any_token_matches(lower, _EXPLICIT_CANCEL):
+            # Capturing subject — exact-only cancel.
+            if _is_cancel_content(lower):
                 return "cancel_email"
             return "send_email"
 
         elif step == "body":
-            # Capturing body: only explicit cancel.
-            if _any_token_matches(lower, _EXPLICIT_CANCEL):
+            # Capturing body — exact-only cancel.
+            if _is_cancel_content(lower):
                 return "cancel_email"
             return "send_email"
 
@@ -526,11 +600,13 @@ def _detect_intent(text: str, session: dict) -> str:
             return "cancel_email"  # unknown at confirm = treat as cancel
 
         else:
-            if _any_token_matches(lower, _EXPLICIT_CANCEL):
+            if _is_cancel_content(lower):
                 return "cancel_email"
             return "send_email"
 
     # ── Stop reading (checked before general intents) ─────────────────────────
+    # Note: also checked at the very top of this function to catch stop inside
+    # compose flows — this second check handles code paths that bypass the top.
     if _any_token_matches(lower, _STOP_EXACT):
         return "stop_reading"
 
@@ -915,9 +991,15 @@ def _handle_read_more(session: dict) -> str:
 
 
 
-def _handle_stop_reading() -> str:
+def _handle_stop_reading(session: dict = None) -> str:
     # Return empty string — frontend stops audio instantly, no TTS needed.
     # Generating TTS for "stop" adds ~500 ms latency for no benefit.
+    # Also clear any active compose flow so the next mic tap starts fresh
+    # rather than resuming a dead (interrupted) workflow.
+    if session:
+        cleared = session.pop("msg_compose", None) or session.pop("email_compose", None)
+        if cleared:
+            session.modified = True
     return ""
 
 
@@ -1440,7 +1522,7 @@ def process_voice_command(audio_file: FileStorage, session: dict, choosing_servi
         "prev_email":        lambda: _handle_prev_email(session),
         "read_more":         lambda: _handle_read_more(session),
         "send_email":        lambda: _handle_send_email(session, transcription, eng_text),
-        "stop_reading":      _handle_stop_reading,
+        "stop_reading":      lambda: _handle_stop_reading(session),
         "cancel_email":      lambda: _handle_cancel_email(session),
         "summarize_email":   lambda: _handle_summarize_email(session),
         "send_message":      lambda: _handle_send_message(session, transcription, eng_text),

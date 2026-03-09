@@ -6,7 +6,10 @@ requests>=2.31.0
 telethon>=1.42.0
 
 # Speech — STT
-openai-whisper
+# faster-whisper uses the same model weights as openai-whisper but runs
+# via CTranslate2 with int8 quantization → ~4x faster on CPU, same accuracy.
+faster-whisper>=1.0.0
+openai-whisper          # kept as fallback; not imported at runtime
 soundfile
 
 # Speech — TTS

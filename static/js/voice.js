@@ -37,14 +37,14 @@ let _voiceLang       = localStorage.getItem('voicemail_lang') || 'en';
 function _setVoiceLang(lang) { _voiceLang = lang || 'en'; }
 
 const TARGET_SAMPLE_RATE = 16000;   // Whisper requirement
-const MAX_RECORD_SECONDS = 8;        // max listen window (seconds) — hard cap
+const MAX_RECORD_SECONDS = 12;       // max listen window (seconds) — hard cap
 const EMAIL_LISTEN_SECS  = 10;       // longer window after email reading
 const BUFFER_SIZE        = 4096;
 
 // ── Silence-gate: stop recording automatically after N ms of silence ─────────
 // This prevents sending 8-10 s of dead air to Whisper, cutting latency by ~5×.
-const SILENCE_THRESHOLD_RMS = 0.008; // RMS below this = silence (0-1 float32 scale)
-const SILENCE_STOP_MS       = 1500;  // stop if silence lasts this long AFTER speech
+const SILENCE_THRESHOLD_RMS = 0.006; // RMS below this = silence (0-1 float32 scale)
+const SILENCE_STOP_MS       = 2200;  // stop if silence lasts this long AFTER speech
 let   _hadSpeech             = false; // true once we've seen at least one voiced frame
 let   _silenceTimer          = null;  // setTimeout handle for auto-stop
 
@@ -405,9 +405,24 @@ function toWavBlob(float32, sampleRate) {
 // ── Words that should cut TTS the instant they're spoken ──────────────────────
 // Mirrors server-side _STOP_EXACT + _CANCEL_EXACT, kept broad for the small model
 const _INTERRUPT_WORDS = new Set([
+  // English
   'stop','top','stock','shop','stuff','stoop','stored','sport','stomp',
   'quiet','quite','silence','silent','pause','paws','halt',
-  'enough','shut','cancel','cancelled','council','console','abort','no','nope',
+  'enough','shut','cancel','cancelled','council','console','no','nope',
+  // Hindi romanized (रुको / बंद / चुप / बस)
+  'ruko','rukho','ruk','bas','chup','band','bandh',
+  // Marathi romanized (थांब / बंद)
+  'thamba','thaamb','thab',
+  // Spanish
+  'para','parar','detente',
+  // French
+  'arr\u00eat','ar\u00eatez',
+  // German
+  'stopp','halt','genug',
+  // Italian
+  'fermati','basta',
+  // Portuguese
+  'parar','pare',
 ]);
 
 // ── Instant stop-watcher using Web Speech API (no server roundtrip) ───────────
@@ -418,7 +433,11 @@ function _startSpeechWatcher() {
   _stopSpeechWatcher();   // kill any previous instance
 
   const recog = new SR();
-  const _langMap = { 'en': 'en-US', 'hi': 'hi-IN', 'mr': 'mr-IN' };
+  const _langMap = {
+    'en': 'en-US', 'hi': 'hi-IN', 'mr': 'mr-IN',
+    'es': 'es-ES', 'fr': 'fr-FR', 'de': 'de-DE',
+    'it': 'it-IT', 'pt': 'pt-PT',
+  };
   recog.lang            = _langMap[_voiceLang] || 'en-US';
   recog.continuous      = true;
   recog.interimResults  = true;   // fire on partial results for fastest response
