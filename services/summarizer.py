@@ -74,6 +74,79 @@ def _clean_body(text: str) -> str:
     return text
 
 
+# Regex patterns for greeting / closing sentences (used by _full_content_summary)
+_GREETING_LINE_RE = re.compile(
+    r"^\s*(?:hi|hello|hey|dear|greetings|good\s+(?:morning|afternoon|evening))"
+    r"(?:\s+\w+)?[\s,!.]*$",
+    re.IGNORECASE,
+)
+_CLOSING_LINE_RE = re.compile(
+    r"^\s*(?:regards|best\s+regards|kind\s+regards|warm\s+regards|sincerely"
+    r"|thanks|thank\s+you|cheers|yours\s+(?:truly|sincerely|faithfully)"
+    r"|with\s+(?:regards|thanks)|looking\s+forward\b.*)[\s,!.]*$",
+    re.IGNORECASE,
+)
+_PLEASANTRY_SENT_RE = re.compile(
+    r"^(?:i\s+hope\s+(?:you|this)|hope\s+you\s+are|how\s+are\s+you"
+    r"|trust\s+this\s+finds|looking\s+forward\s+to\s+hearing"
+    r"|please\s+(?:do\s+not\s+hesitate|feel\s+free)|let\s+me\s+know\s+if"
+    r"|have\s+a\s+(?:great|good|nice|wonderful)\s+(?:day|week|weekend))",
+    re.IGNORECASE,
+)
+
+
+def _full_content_summary(text: str) -> str:
+    """
+    Return a comprehensive summary of the entire email body.
+
+    Unlike extractive methods that pick N sentences, this:
+    1. Cleans all HTML, links, quotations, and signatures.
+    2. Removes standalone greeting lines ("Hi Rutik") and closing lines
+       ("Regards, ...").
+    3. Removes pure-pleasantry sentences that carry no information.
+    4. Returns ALL remaining substantive sentences joined together —
+       so nothing important in the email is lost.
+    5. Caps at 800 characters for TTS readability.
+    """
+    clean = _clean_body(text)
+    if not clean:
+        return "No readable content found."
+
+    # Split on sentence boundaries
+    sentences = re.split(r"(?<=[.!?])\s+", clean)
+    sentences = [s.strip() for s in sentences if s.strip()]
+
+    substantive = []
+    for sent in sentences:
+        # Skip very short noise (< 8 chars)
+        if len(sent) < 8:
+            continue
+        # Skip standalone greeting lines
+        if _GREETING_LINE_RE.match(sent):
+            continue
+        # Skip standalone closing lines
+        if _CLOSING_LINE_RE.match(sent):
+            continue
+        # Skip pure pleasantry sentences
+        if _PLEASANTRY_SENT_RE.match(sent):
+            continue
+        # Strip inline greeting prefix from sentences like "Hi Rutik, please find..."
+        cleaned_sent = re.sub(
+            r"^(?:hi|hello|hey|dear)\s+\w+[\s,!.]+",
+            "", sent, flags=re.IGNORECASE
+        ).strip()
+        substantive.append(cleaned_sent if len(cleaned_sent) >= 8 else sent)
+
+    if not substantive:
+        # Fallback: return the cleaned body truncated
+        return clean[:800] + ("\u2026" if len(clean) > 800 else "")
+
+    result = " ".join(substantive)
+    if len(result) > 800:
+        result = result[:800].rsplit(" ", 1)[0] + "\u2026"
+    return result
+
+
 def _extractive_oneline(text: str) -> str:
     """
     Return a single sentence that best captures the main purpose of the email.
@@ -205,6 +278,108 @@ def _extractive_oneline(text: str) -> str:
     return best_sent
 
 
+def _extractive_multi(text: str, max_sentences: int = 3) -> str:
+    """
+    Return the top `max_sentences` TF-scored sentences joined in document order.
+
+    Uses the same scoring algorithm as `_extractive_oneline` but selects
+    multiple sentences so the result covers the full email, not just one line.
+    Ideal for email summaries shown in the UI.
+    """
+    clean = _clean_body(text)
+    if not clean:
+        return "No readable content found."
+
+    sentences = re.split(r"(?<=[.!?])\s+", clean)
+    sentences = [s.strip() for s in sentences if len(s.strip()) >= 12]
+
+    if not sentences:
+        return clean[:400] + ("…" if len(clean) > 400 else "")
+
+    if len(sentences) <= max_sentences:
+        return " ".join(sentences)
+
+    # ── Shared scoring setup (mirrors _extractive_oneline) ───────────────────
+    _OPENER_RE = re.compile(
+        r"^(?:hi\s*[,!]?\s*|hello\s*[,!]?\s*|hey\s*[,!]?\s*"
+        r"|dear\s+\S+[\s,!]*|greetings\s*[,!]?\s*"
+        r"|good\s+(?:morning|afternoon|evening)\s*[,!]?\s*)",
+        re.IGNORECASE,
+    )
+    _PLEASANTRY_RE = re.compile(
+        r"^(i\s+hope\s+(you|this)|hope\s+you\s+are|how\s+are\s+you"
+        r"|trust\s+this\s+finds|looking\s+forward|thank\s+you\s+for\s+your"
+        r"|please\s+(do\s+not\s+hesitate|feel\s+free)|let\s+me\s+know\s+if)",
+        re.IGNORECASE,
+    )
+    _ACTION_WORDS = {
+        "please","request","require","inform","deadline","due","submit",
+        "deliver","attend","meeting","interview","schedule","payment",
+        "invoice","confirm","urgent","important","action","follow","update",
+        "complete","review","approve","attached","regarding","enquiry",
+        "inquiry","offer","joining","report","issue","problem","concern",
+        "respond","reply","remind","notice","invitation","congratulations",
+        "selected","rejected","approved","postponed","cancelled","reschedule",
+        "alert","assignment","task","project","proposal","quotation","need",
+    }
+
+    all_words    = re.findall(r"[a-zA-Z]{3,}", clean.lower())
+    content_words = [w for w in all_words if w not in _STOP_WORDS]
+    freq         = Counter(content_words)
+    max_freq     = max(freq.values()) if freq else 1
+    norm_freq    = {w: freq[w] / max_freq for w in freq}
+
+    n      = len(sentences)
+    scored = []
+
+    for i, sent in enumerate(sentences):
+        score_text = _OPENER_RE.sub("", sent).strip() or sent
+        lower_sent = score_text.lower()
+        words      = re.findall(r"[a-zA-Z]{3,}", lower_sent)
+        if not words:
+            continue
+
+        if _PLEASANTRY_RE.match(sent.strip()):
+            score = 0.02
+        else:
+            content_sc = [norm_freq.get(w, 0.0) for w in words if w not in _STOP_WORDS]
+            score      = (sum(content_sc) / len(content_sc)) if content_sc else 0.0
+
+        had_opener = (score_text != sent)
+        pos_ratio  = i / n
+        if (0 < i <= 5 or (i == 0 and had_opener and len(score_text) >= 30)) and pos_ratio < 0.50:
+            score *= 1.30
+        elif i == 0 and not had_opener:
+            score *= 1.10
+        elif pos_ratio > 0.75:
+            score *= 0.70
+
+        if any(w in _ACTION_WORDS for w in words):
+            score *= 1.25
+
+        length = len(score_text)
+        if length < 25:
+            score *= 0.50
+        elif length > 250:
+            score *= 0.80
+
+        scored.append((score, i, sent))
+
+    # Pick best N by score, then restore document order for natural reading
+    top = sorted(scored, key=lambda x: -x[0])[:max_sentences]
+    top = sorted(top, key=lambda x: x[1])
+
+    parts = []
+    for _, _, sent in top:
+        sent = _OPENER_RE.sub("", sent).strip() or sent
+        parts.append(sent)
+
+    result = " ".join(parts)
+    if len(result) > 600:
+        result = result[:600].rsplit(" ", 1)[0] + "…"
+    return result
+
+
 # ── Simple summarizer (kept for backward-compat; used by non-email callers) ───
 
 def _simple_summarize(text: str, max_sentences: int = 2) -> str:
@@ -295,20 +470,28 @@ def summarize_text(text: str, mode: str = "simple", max_sentences: int = 2) -> s
         return _transformer_summarize(text)
     elif mode == "extractive":
         return _extractive_oneline(text)
+    elif mode == "extractive_multi":
+        return _extractive_multi(text, max_sentences=max_sentences)
+    elif mode == "full":
+        return _full_content_summary(text)
     else:
         return _simple_summarize(text, max_sentences=max_sentences)
 
 
-def summarize_email(email_dict: dict, mode: str = "simple") -> str:
+def summarize_email(email_dict: dict, mode: str = "full") -> str:
     """
     Convenience wrapper for email dicts returned by email_service.
 
-    Combines subject + body for a richer summary.
+    Uses 'full' mode by default: strips all greetings/closings/pleasantries
+    and returns ALL substantive content from the email body so nothing
+    important is lost.
     """
-    subject = email_dict.get("subject", "")
-    body    = email_dict.get("body", email_dict.get("snippet", ""))
-    combined = f"{subject}. {body}".strip()
-    summary  = summarize_text(combined, mode=mode)
+    subject  = email_dict.get("subject", "")
+    body     = email_dict.get("body", email_dict.get("snippet", ""))
+    # Summarize body alone (subject is shown separately in the UI)
+    summary  = summarize_text(body, mode=mode) if body else subject
+    if not summary or summary == "No readable content found." or summary == "No content to summarize.":
+        summary = subject or "Empty email."
     return f"Email from {email_dict.get('sender', 'unknown')}: {summary}"
 
 

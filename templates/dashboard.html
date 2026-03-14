@@ -47,6 +47,12 @@
         <option value="pt">🇵🇹 Portuguese</option>
       </select>
       <span class="text-gray-300 text-sm">{{ user.email }}</span>
+      {% if is_admin %}
+      <a href="/admin"
+        class="text-sm bg-emerald-600/30 hover:bg-emerald-600/50 px-4 py-2 rounded-xl transition">
+        Admin
+      </a>
+      {% endif %}
       <button id="logoutBtnEl" onclick="logoutUser()"
         class="text-sm bg-white/10 hover:bg-white/20 px-4 py-2 rounded-xl transition">
         Logout
@@ -367,6 +373,21 @@
       <p id="confirmActionText" class="text-gray-300 text-center text-sm leading-relaxed"></p>
       <!-- TTS is auto-played; status shown below -->
       <p id="confirmStatusMsg" class="text-yellow-300 text-xs text-center animate-pulse">🔊 Listen, then respond…</p>
+      <div class="space-y-2">
+        <label for="confirmPinInput" class="block text-xs text-gray-400">Voice PIN</label>
+        <div class="flex gap-2">
+          <input id="confirmPinInput" type="password"
+            class="flex-1 bg-white/10 border border-white/20 rounded-xl px-3 py-2 text-white
+                   placeholder-gray-400 focus:outline-none focus:border-purple-400 text-sm"
+            placeholder="Enter or speak your PIN" />
+          <button type="button" onclick="capturePinVoice()"
+            class="px-3 py-2 rounded-xl bg-purple-600/60 hover:bg-purple-600 text-sm">🎤 PIN</button>
+        </div>
+      </div>
+      <button type="button" onclick="captureConfirmVoice()"
+        class="w-full py-2 rounded-xl bg-indigo-600/50 hover:bg-indigo-600/70 text-sm">
+        🎙️ Speak Yes or No
+      </button>
       <!-- Yes / No buttons (click OR voice) -->
       <div class="flex gap-4">
         <button id="confirmYesBtn" onclick="resolveConfirm(true)"
@@ -380,7 +401,7 @@
           ❌ Cancel
         </button>
       </div>
-      <p class="text-xs text-gray-500 text-center">You can also say "yes" or "no" using the mic 🎤</p>
+      <p class="text-xs text-gray-500 text-center">Security layers: login + action confirmation + PIN</p>
     </div>
   </div>
 
@@ -455,6 +476,7 @@
 
     // Confirmation promise resolver (used by the confirm modal)
     let _confirmResolve = null;
+    let _confirmChallengeId = null;
 
     // Last opened email index (used by summarize / suggest reply in modal)
     let _openEmailIdx = -1;
@@ -1181,36 +1203,17 @@
     // ── Email sender ─────────────────────────────────────────────────────────
     async function sendEmail(e) {
       e.preventDefault();
-      const btn = e.target.querySelector('button[type="submit"]');
-      const statusDiv = document.getElementById('sendStatus');
-      btn.disabled = true;
-      btn.textContent = '⏳ Sending…';
+      await sendEmailWithConfirm();
+    }
 
-      try {
-        const res = await fetch('/send-email', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            to: document.getElementById('toAddr').value,
-            subject: document.getElementById('subject').value,
-            body: document.getElementById('body').value,
-          }),
-        });
-        const data = await res.json();
-        statusDiv.textContent = data.message || (data.success ? 'Sent!' : 'Failed.');
-        statusDiv.className = res.ok
-          ? 'mt-3 text-center text-sm rounded-xl py-2 px-4 bg-green-900/40 text-green-300'
-          : 'mt-3 text-center text-sm rounded-xl py-2 px-4 bg-red-900/40 text-red-300';
-        statusDiv.classList.remove('hidden');
-        if (res.ok) clearCompose();
-      } catch {
-        statusDiv.textContent = 'Network error.';
-        statusDiv.className = 'mt-3 text-center text-sm rounded-xl py-2 px-4 bg-red-900/40 text-red-300';
-        statusDiv.classList.remove('hidden');
-      } finally {
-        btn.disabled = false;
-        btn.textContent = '📤 Send Email';
-      }
+    function showSendStatus(elementId, text, ok) {
+      const el = document.getElementById(elementId);
+      if (!el) return;
+      el.textContent = text;
+      el.className = ok
+        ? 'mt-3 text-center text-sm rounded-xl py-2 px-4 bg-green-900/40 text-green-300'
+        : 'mt-3 text-center text-sm rounded-xl py-2 px-4 bg-red-900/40 text-red-300';
+      el.classList.remove('hidden');
     }
 
     function clearCompose() {
@@ -1244,7 +1247,9 @@
     async function summarizeOpenEmail() {
       if (_openEmailIdx >= 0) {
         document.getElementById('emailModal').classList.add('hidden');
+        switchTab('email');
         await quickSummarizeEmail(_openEmailIdx);
+        document.getElementById('emailSummaryBox').scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
     }
 
@@ -1259,24 +1264,33 @@
     async function suggestEmailReply() {
       const e = _emails[_openEmailIdx];
       if (!e) return;
-      const text = (e.subject || '') + ' ' + (e.snippet || e.body || '');
-      const res  = await fetch('/reply/suggest-tts', {
-        method : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body   : JSON.stringify({ message: text, lang: _currentLang }),
-      });
-      const data = await res.json();
-      // Pre-fill compose with first suggestion and close modal
+      // Close modal immediately so the user gets visual feedback
       document.getElementById('emailModal').classList.add('hidden');
-      const subj = (e.subject || '').startsWith('Re:') ? e.subject : 'Re: ' + (e.subject || '');
-      const from = (e.from || '');
-      const match = from.match(/<(.+?)>/);
-      document.getElementById('toAddr').value    = match ? match[1] : from;
-      document.getElementById('subject').value   = subj;
-      document.getElementById('body').value      = data.primary || '';
-      if (data.audio_url) playAudio(data.audio_url);
       switchTab('email');
+      const bodyEl = document.getElementById('body');
+      bodyEl.value = '⏳ Generating suggestion…';
       document.getElementById('toAddr').scrollIntoView({ behavior: 'smooth' });
+      try {
+        const text = (e.subject || '') + ' ' + (e.snippet || e.body || '');
+        const res  = await fetch('/reply/suggest-tts', {
+          method : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body   : JSON.stringify({ message: text, lang: _currentLang }),
+        });
+        if (!res.ok) throw new Error('Server error ' + res.status);
+        const data = await res.json();
+        const subj = (e.subject || '').startsWith('Re:') ? e.subject : 'Re: ' + (e.subject || '');
+        const from = (e.from || '');
+        const match = from.match(/<(.+?)>/);
+        document.getElementById('toAddr').value  = match ? match[1] : from;
+        document.getElementById('subject').value = subj;
+        bodyEl.value                             = data.primary || '';
+        if (data.audio_url) playAudio(data.audio_url);
+        document.getElementById('toAddr').focus();
+      } catch (err) {
+        bodyEl.value = '';
+        alert('Could not get a suggestion: ' + err.message);
+      }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -1306,6 +1320,7 @@
       document.getElementById('toAddr').value    = match ? match[1] : from;
       document.getElementById('subject').value   = subj.startsWith('Re:') ? subj : 'Re: ' + subj;
       document.getElementById('emailModal').classList.add('hidden');
+      switchTab('email');
       document.getElementById('toAddr').scrollIntoView({ behavior: 'smooth' });
       document.getElementById('toAddr').focus();
     }
@@ -1317,9 +1332,11 @@
      * Show the confirmation modal, play TTS audio, wait for user click.
      * Returns Promise<boolean>  true = confirmed,  false = cancelled.
      */
-    function showConfirmModal(actionText) {
+    function showConfirmModal(actionText, actionType, payload) {
       return new Promise(async (resolve) => {
         _confirmResolve = resolve;
+        _confirmChallengeId = null;
+        document.getElementById('confirmPinInput').value = '';
         document.getElementById('confirmActionText').textContent = actionText;
         document.getElementById('confirmStatusMsg').textContent  = '🔊 Generating confirmation audio…';
         document.getElementById('confirmModal').classList.remove('hidden');
@@ -1329,11 +1346,21 @@
           const res  = await fetch('/confirm/start', {
             method : 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body   : JSON.stringify({ action_text: actionText, lang: _currentLang }),
+            body   : JSON.stringify({
+              action_text: actionText,
+              lang: _currentLang,
+              action_type: actionType,
+              payload,
+            }),
           });
           const data = await res.json();
+          if (!res.ok) {
+            document.getElementById('confirmStatusMsg').textContent = data.error || 'Unable to start secure confirmation.';
+            return;
+          }
+          _confirmChallengeId = data.challenge_id || null;
           if (data.audio_url) {
-            document.getElementById('confirmStatusMsg').textContent = '🔊 Listen carefully, then click Yes or No.';
+            document.getElementById('confirmStatusMsg').textContent = '🔊 Listen, then click Yes and provide PIN.';
             playAudio(data.audio_url);
           }
         } catch {
@@ -1342,9 +1369,122 @@
       });
     }
 
-    function resolveConfirm(confirmed) {
-      document.getElementById('confirmModal').classList.add('hidden');
-      if (_confirmResolve) { _confirmResolve(confirmed); _confirmResolve = null; }
+    function _normalizePinCandidate(value) {
+      const map = {
+        zero: '0', oh: '0', o: '0',
+        one: '1', two: '2', to: '2', too: '2',
+        three: '3', four: '4', for: '4', five: '5',
+        six: '6', seven: '7', eight: '8', nine: '9',
+      };
+      return (value || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .map(tok => map[tok] || (/^\d+$/.test(tok) ? tok : ''))
+        .join('');
+    }
+
+    function capturePinVoice() {
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SR) {
+        document.getElementById('confirmStatusMsg').textContent = 'Voice PIN is not supported in this browser. Type PIN manually.';
+        return;
+      }
+      const recog = new SR();
+      recog.lang = _currentLang === 'hi' ? 'hi-IN' : (_currentLang === 'mr' ? 'mr-IN' : 'en-US');
+      recog.interimResults = false;
+      recog.maxAlternatives = 3;
+      document.getElementById('confirmStatusMsg').textContent = '🎤 Listening for PIN…';
+      recog.onresult = (event) => {
+        const heard = event.results[0][0].transcript || '';
+        const pin = _normalizePinCandidate(heard);
+        document.getElementById('confirmPinInput').value = pin;
+        document.getElementById('confirmStatusMsg').textContent = pin
+          ? 'PIN captured. Click Yes to verify.'
+          : 'Could not detect PIN digits. Try again or type manually.';
+      };
+      recog.onerror = () => {
+        document.getElementById('confirmStatusMsg').textContent = 'Voice PIN capture failed. Type PIN manually.';
+      };
+      try { recog.start(); } catch (_) {}
+    }
+
+    function captureConfirmVoice() {
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SR) {
+        document.getElementById('confirmStatusMsg').textContent = 'Voice confirmation is not supported in this browser.';
+        return;
+      }
+      const recog = new SR();
+      recog.lang = _currentLang === 'hi' ? 'hi-IN' : (_currentLang === 'mr' ? 'mr-IN' : 'en-US');
+      recog.interimResults = false;
+      recog.maxAlternatives = 3;
+      document.getElementById('confirmStatusMsg').textContent = '🎤 Listening for yes/no…';
+      recog.onresult = (event) => {
+        const heard = (event.results[0][0].transcript || '').toLowerCase();
+        if (/\b(yes|yeah|yep|confirm|ok|okay|send|ha|haan|ho)\b/.test(heard)) {
+          resolveConfirm(true);
+          return;
+        }
+        if (/\b(no|nope|cancel|abort|stop|nah|nahi)\b/.test(heard)) {
+          resolveConfirm(false);
+          return;
+        }
+        document.getElementById('confirmStatusMsg').textContent = 'Could not detect yes/no. Please try again.';
+      };
+      recog.onerror = () => {
+        document.getElementById('confirmStatusMsg').textContent = 'Voice confirmation failed. Use buttons instead.';
+      };
+      try { recog.start(); } catch (_) {}
+    }
+
+    async function resolveConfirm(confirmed) {
+      if (!confirmed) {
+        document.getElementById('confirmModal').classList.add('hidden');
+        if (_confirmResolve) {
+          _confirmResolve({ confirmed: false });
+          _confirmResolve = null;
+        }
+        return;
+      }
+
+      if (!_confirmChallengeId) {
+        document.getElementById('confirmStatusMsg').textContent = 'Challenge is missing. Please retry.';
+        return;
+      }
+
+      const pin = document.getElementById('confirmPinInput').value.trim();
+      if (!pin) {
+        document.getElementById('confirmStatusMsg').textContent = 'PIN is required to continue.';
+        return;
+      }
+
+      document.getElementById('confirmStatusMsg').textContent = 'Verifying confirmation and PIN…';
+      try {
+        const res = await fetch('/confirm/answer', {
+          method : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body   : JSON.stringify({
+            challenge_id: _confirmChallengeId,
+            transcription: 'yes',
+            pin,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.confirmed || !data.confirmation_token) {
+          document.getElementById('confirmStatusMsg').textContent =
+            data.message || data.error || `Verification failed. Attempts left: ${data.remaining_attempts ?? 0}`;
+          return;
+        }
+
+        document.getElementById('confirmModal').classList.add('hidden');
+        if (_confirmResolve) {
+          _confirmResolve({ confirmed: true, confirmationToken: data.confirmation_token });
+          _confirmResolve = null;
+        }
+      } catch {
+        document.getElementById('confirmStatusMsg').textContent = 'Network error while verifying PIN.';
+      }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -1361,10 +1501,10 @@
       }
 
       const actionText = `send an email to ${to} with subject: ${subject}`;
-      const confirmed  = await showConfirmModal(actionText);
+      const confirmResult = await showConfirmModal(actionText, 'email_send', { to, subject, body });
 
-      if (!confirmed) {
-        showSendStatus('emailSendStatus', 'Send cancelled.', false);
+      if (!confirmResult || !confirmResult.confirmed) {
+        showSendStatus('sendStatus', 'Send cancelled.', false);
         return;
       }
 
@@ -1374,10 +1514,15 @@
         const res  = await fetch('/send-email', {
           method : 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body   : JSON.stringify({ to, subject, body }),
+          body   : JSON.stringify({
+            to,
+            subject,
+            body,
+            confirmation_token: confirmResult.confirmationToken,
+          }),
         });
         const data = await res.json();
-        statusDiv.textContent = data.message || (data.success ? 'Sent!' : 'Failed.');
+        statusDiv.textContent = data.message || data.error || (data.success ? 'Sent!' : 'Failed.');
         statusDiv.className = res.ok
           ? 'mt-3 text-center text-sm rounded-xl py-2 px-4 bg-green-900/40 text-green-300'
           : 'mt-3 text-center text-sm rounded-xl py-2 px-4 bg-red-900/40 text-red-300';
@@ -1525,10 +1670,10 @@
       }
 
       const actionText = `send a message to ${receiver}: "${message.substring(0, 60)}${message.length > 60 ? '…' : ''}"`;
-      const confirmed  = await showConfirmModal(actionText);
+      const confirmResult = await showConfirmModal(actionText, 'message_send', { receiver, message });
 
       const statusDiv = document.getElementById('msgSendStatus');
-      if (!confirmed) {
+      if (!confirmResult || !confirmResult.confirmed) {
         statusDiv.textContent = 'Send cancelled.';
         statusDiv.className   = 'mt-3 text-center text-sm rounded-xl py-2 px-4 bg-yellow-900/40 text-yellow-300';
         statusDiv.classList.remove('hidden');
@@ -1539,7 +1684,11 @@
         const res  = await fetch('/messages/send', {
           method : 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body   : JSON.stringify({ receiver, message }),
+          body   : JSON.stringify({
+            receiver,
+            message,
+            confirmation_token: confirmResult.confirmationToken,
+          }),
         });
         const data = await res.json();
         statusDiv.textContent = data.message || (data.success ? 'Message sent!' : 'Failed to send.');

@@ -1,6 +1,8 @@
 import os
 import uuid
-from flask import Flask, request, jsonify, session, send_from_directory, render_template
+from datetime import datetime, timedelta, timezone
+from functools import wraps
+from flask import Flask, request, jsonify, session, send_from_directory, render_template, redirect, url_for
 from flask_login import LoginManager, login_required, current_user, logout_user
 from config import Config
 from auth.google_auth import google_auth_bp, GoogleUser
@@ -29,10 +31,24 @@ from services.messaging_service import (
 from services.summarizer import summarize_text, summarize_email, summarize_message
 from services.reply_engine import suggest_reply
 from services.voice_service import speak_confirmation, check_confirmation_answer, speak_text_lang
+from services.security_admin import (
+    get_activity_log,
+    get_metrics,
+    get_users,
+    hash_payload,
+    log_activity,
+    resolve_role,
+    update_user_role,
+    verify_pin,
+)
 
 # ── App factory ──────────────────────────────────────────────────────────────
 app = Flask(__name__)
 app.config.from_object(Config)
+# Keep sessions alive across server restarts (cookie survives as long as
+# SECRET_KEY doesn't change — it's pinned in .env)
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=7)
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
 # Allow OAuth over plain HTTP during local development
 os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = app.config["OAUTHLIB_INSECURE_TRANSPORT"]
@@ -40,6 +56,151 @@ os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = app.config["OAUTHLIB_INSECURE_TRANSP
 # ── Flask-Login setup ─────────────────────────────────────────────────────────
 login_manager = LoginManager(app)
 login_manager.login_view = "index"
+
+
+def _current_role() -> str:
+    user_data = session.get("user", {})
+    role = user_data.get("role") or getattr(current_user, "role", None)
+    if role:
+        return role
+    return resolve_role(user_data.get("email", ""))
+
+
+def _log_user_action(action: str, status: str = "success", details: dict | None = None):
+    user_data = session.get("user", {})
+    log_activity(
+        user_email=user_data.get("email", "anonymous"),
+        role=_current_role(),
+        action=action,
+        status=status,
+        details=details,
+        ip=request.remote_addr,
+    )
+
+
+def admin_required(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if _current_role() != "admin":
+            _log_user_action("admin_access_denied", status="error")
+            return jsonify({"error": "Admin access required"}), 403
+        return fn(*args, **kwargs)
+
+    return wrapper
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _cleanup_security_state() -> None:
+    now = _utc_now().timestamp()
+    challenges = session.get("action_challenges", {})
+    tokens = session.get("action_tokens", {})
+
+    challenges = {
+        key: value
+        for key, value in challenges.items()
+        if value.get("expires_at", 0) >= now and value.get("attempts", 0) < Config.PIN_MAX_ATTEMPTS
+    }
+    tokens = {
+        key: value
+        for key, value in tokens.items()
+        if value.get("expires_at", 0) >= now and not value.get("used", False)
+    }
+
+    session["action_challenges"] = challenges
+    session["action_tokens"] = tokens
+    session.modified = True
+
+
+def _validate_action_payload(action_type: str, payload: dict) -> tuple[bool, str]:
+    if action_type == "email_send":
+        to_addr = (payload.get("to") or "").strip()
+        subject = (payload.get("subject") or "").strip()
+        body = (payload.get("body") or "").strip()
+        if not to_addr or "@" not in to_addr or "." not in to_addr.split("@")[-1]:
+            return False, "Invalid recipient email"
+        if not subject:
+            return False, "Subject is required"
+        if not body:
+            return False, "Message body is required"
+        if len(subject) > 255:
+            return False, "Subject is too long"
+        return True, "ok"
+
+    if action_type == "message_send":
+        receiver = (payload.get("receiver") or "").strip()
+        message = (payload.get("message") or "").strip()
+        if not receiver:
+            return False, "Receiver is required"
+        if not message:
+            return False, "Message is required"
+        if len(message) > 4000:
+            return False, "Message is too long"
+        return True, "ok"
+
+    return False, "Unsupported action_type"
+
+
+def _create_security_challenge(action_type: str, action_text: str, payload: dict) -> str:
+    _cleanup_security_state()
+    challenge_id = uuid.uuid4().hex
+    challenges = session.get("action_challenges", {})
+    challenges[challenge_id] = {
+        "action_type": action_type,
+        "action_text": action_text,
+        "payload_hash": hash_payload(payload),
+        "created_at": _utc_now().timestamp(),
+        "expires_at": (_utc_now() + timedelta(seconds=Config.ACTION_CHALLENGE_TTL)).timestamp(),
+        "attempts": 0,
+        "confirmed": False,
+    }
+    session["action_challenges"] = challenges
+    session.modified = True
+    return challenge_id
+
+
+def _issue_confirmation_token(challenge_id: str) -> str:
+    challenges = session.get("action_challenges", {})
+    challenge = challenges.get(challenge_id)
+    if not challenge:
+        return ""
+
+    token = uuid.uuid4().hex
+    tokens = session.get("action_tokens", {})
+    tokens[token] = {
+        "challenge_id": challenge_id,
+        "action_type": challenge.get("action_type"),
+        "payload_hash": challenge.get("payload_hash"),
+        "issued_at": _utc_now().timestamp(),
+        "expires_at": (_utc_now() + timedelta(seconds=Config.ACTION_TOKEN_TTL)).timestamp(),
+        "used": False,
+    }
+    session["action_tokens"] = tokens
+    session.modified = True
+    return token
+
+
+def _consume_confirmation_token(token: str, action_type: str, payload: dict) -> tuple[bool, str]:
+    _cleanup_security_state()
+    if not token:
+        return False, "confirmation_token is required"
+
+    tokens = session.get("action_tokens", {})
+    info = tokens.get(token)
+    if not info:
+        return False, "Invalid or expired confirmation token"
+    if info.get("action_type") != action_type:
+        return False, "Action type mismatch"
+    if info.get("payload_hash") != hash_payload(payload):
+        return False, "Confirmation token does not match request payload"
+
+    info["used"] = True
+    tokens[token] = info
+    session["action_tokens"] = tokens
+    session.modified = True
+    return True, "ok"
 
 
 @login_manager.user_loader
@@ -533,10 +694,81 @@ def voice_correct_email():
 @app.route("/dashboard")
 @login_required
 def dashboard():
-    return render_template("dashboard.html", user=current_user)
+    role = _current_role()
+    _log_user_action("dashboard_viewed", details={"role": role})
+    return render_template("dashboard.html", user=current_user, is_admin=(role == "admin"))
 
 
-# ── Voice API ─────────────────────────────────────────────────────────────────
+@app.route("/admin")
+@login_required
+@admin_required
+def admin_dashboard():
+    _log_user_action("admin_dashboard_viewed")
+    return render_template("admin.html", user=current_user)
+
+
+@app.route("/admin/metrics", methods=["GET"])
+@login_required
+@admin_required
+def admin_metrics():
+    _log_user_action("admin_metrics_viewed")
+    return jsonify(get_metrics())
+
+
+@app.route("/admin/users", methods=["GET"])
+@login_required
+@admin_required
+def admin_users():
+    """Return the full user registry for the admin dashboard."""
+    _log_user_action("admin_users_viewed")
+    return jsonify(get_users())
+
+
+@app.route("/admin/users/<path:email>/role", methods=["PUT"])
+@login_required
+@admin_required
+def admin_update_role(email: str):
+    """Toggle a user's role between 'user' and 'admin'."""
+    data = request.get_json(silent=True) or {}
+    new_role = data.get("role", "")
+    if new_role not in ("user", "admin"):
+        return jsonify({"error": "role must be 'user' or 'admin'"}), 400
+    updated = update_user_role(email, new_role)
+    if not updated:
+        return jsonify({"error": "User not found"}), 404
+    _log_user_action("admin_role_changed", details={"target": email, "new_role": new_role})
+    return jsonify({"ok": True, "email": email, "role": new_role})
+
+
+@app.route("/admin/activity", methods=["GET"])
+@login_required
+@admin_required
+def admin_activity():
+    """Filtered activity log with optional ?status= and ?user= query params."""
+    status_filter = request.args.get("status", "").strip() or None
+    user_filter   = request.args.get("user",   "").strip() or None
+    limit         = min(int(request.args.get("limit", 200)), 1000)
+    _log_user_action("admin_activity_viewed")
+    return jsonify(get_activity_log(limit=limit, status_filter=status_filter, user_filter=user_filter))
+
+
+@app.route("/admin/export/activity.json", methods=["GET"])
+@login_required
+@admin_required
+def admin_export_activity():
+    """Download the full activity log as a JSON file."""
+    _log_user_action("admin_export_activity")
+    from flask import Response
+    import json as _json
+    data = get_activity_log(limit=5000)
+    return Response(
+        _json.dumps(data, indent=2),
+        mimetype="application/json",
+        headers={"Content-Disposition": "attachment; filename=activity_log.json"},
+    )
+
+
+
 @app.route("/voice/process", methods=["POST"])
 @login_required
 def voice_process():
@@ -558,7 +790,25 @@ def voice_process():
 
     audio_file       = request.files["audio"]
     choosing_service = request.form.get("choosing_service") == "true"
-    result           = process_voice_command(audio_file, session, choosing_service=choosing_service)
+    try:
+        result = process_voice_command(audio_file, session, choosing_service=choosing_service)
+        _log_user_action("voice_command_processed", details={"intent": result.get("intent", "unknown")})
+    except Exception as exc:
+        app.logger.exception("process_voice_command failed")
+        _log_user_action("voice_command_error", status="error", details={"error": str(exc)})
+        return jsonify({
+            "transcription": "",
+            "intent":        "error",
+            "response_text": f"Sorry, something went wrong: {exc}",
+            "audio_url":     None,
+        }), 500
+
+    # If the voice command was a logout, clear the Flask-Login session here
+    # (process_voice_command is a service and cannot call logout_user directly).
+    if result.get("intent") == "logout":
+        logout_user()
+        session.clear()
+
     return jsonify(result)
 
 
@@ -665,22 +915,37 @@ def voice_msg_compose_text():
 @login_required
 def get_emails():
     emails = fetch_emails(session)
+    _log_user_action("emails_fetched", details={"count": len(emails)})
     return jsonify({"emails": emails})
 
 
 @app.route("/send-email", methods=["POST"])
 @login_required
 def send_email_route():
-    data = request.get_json()
+    data = request.get_json() or {}
     to_addr = data.get("to", "").strip()
     subject = data.get("subject", "").strip()
     body = data.get("body", "").strip()
+    payload = {"to": to_addr, "subject": subject, "body": body}
 
-    if not to_addr or not subject or not body:
-        return jsonify({"error": "Missing required fields"}), 400
+    valid, validation_message = _validate_action_payload("email_send", payload)
+    if not valid:
+        _log_user_action("email_send_rejected", status="error", details={"reason": validation_message})
+        return jsonify({"error": validation_message}), 400
+
+    token = (data.get("confirmation_token") or "").strip()
+    allowed, token_message = _consume_confirmation_token(token, "email_send", payload)
+    if not allowed:
+        _log_user_action("email_send_blocked", status="error", details={"reason": token_message})
+        return jsonify({"error": token_message}), 403
 
     success, message = send_email(session, to_addr, subject, body)
     status = 200 if success else 500
+    _log_user_action(
+        "email_sent" if success else "email_send_failed",
+        status="success" if success else "error",
+        details={"to": to_addr, "subject": subject[:80]},
+    )
     return jsonify({"success": success, "message": message}), status
 
 
@@ -694,9 +959,10 @@ def serve_audio(filename):
 @app.route("/logout")
 @login_required
 def logout():
+    _log_user_action("logout")
     logout_user()
     session.clear()
-    return jsonify({"message": "Logged out"}), 200
+    return redirect(url_for("index"))
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -741,12 +1007,26 @@ def send_message_route():
     data     = request.get_json(force=True) or {}
     receiver = data.get("receiver", "").strip()
     message  = data.get("message", "").strip()
+    payload  = {"receiver": receiver, "message": message}
 
-    if not receiver or not message:
-        return jsonify({"success": False, "message": "receiver and message are required"}), 400
+    valid, validation_message = _validate_action_payload("message_send", payload)
+    if not valid:
+        _log_user_action("message_send_rejected", status="error", details={"reason": validation_message})
+        return jsonify({"success": False, "message": validation_message}), 400
+
+    token = (data.get("confirmation_token") or "").strip()
+    allowed, token_message = _consume_confirmation_token(token, "message_send", payload)
+    if not allowed:
+        _log_user_action("message_send_blocked", status="error", details={"reason": token_message})
+        return jsonify({"success": False, "message": token_message}), 403
 
     result = msg_send(receiver, message)
     status = 200 if result["success"] else 400
+    _log_user_action(
+        "message_sent" if result.get("success") else "message_send_failed",
+        status="success" if result.get("success") else "error",
+        details={"receiver": receiver},
+    )
     return jsonify(result), status
 
 
@@ -915,9 +1195,13 @@ def summarize_tts_route():
     else:
         return jsonify({"error": "Provide 'text', 'email', or 'message'"}), 400
 
-    out_path  = os.path.join(Config.UPLOAD_FOLDER, f"summary_{uuid.uuid4().hex}.wav")
-    speak_text_lang(summary, lang=lang, out_path=out_path)
-    audio_url = f"/static/audio/{os.path.basename(out_path)}"
+    try:
+        out_path  = os.path.join(Config.UPLOAD_FOLDER, f"summary_{uuid.uuid4().hex}.wav")
+        speak_text_lang(summary, lang=lang, out_path=out_path)
+        audio_url = f"/static/audio/{os.path.basename(out_path)}"
+    except Exception as exc:
+        app.logger.exception("TTS failed in /summarize/tts")
+        audio_url = None
 
     return jsonify({"summary": summary, "audio_url": audio_url})
 
@@ -963,9 +1247,13 @@ def suggest_reply_tts_route():
     primary  = result["primary"]
     # Prepend a brief intro for natural TTS reading
     spoken   = f"Suggested reply: {primary}"
-    out_path = os.path.join(Config.UPLOAD_FOLDER, f"reply_{uuid.uuid4().hex}.wav")
-    speak_text_lang(spoken, lang=lang, out_path=out_path)
-    result["audio_url"] = f"/static/audio/{os.path.basename(out_path)}"
+    try:
+        out_path = os.path.join(Config.UPLOAD_FOLDER, f"reply_{uuid.uuid4().hex}.wav")
+        speak_text_lang(spoken, lang=lang, out_path=out_path)
+        result["audio_url"] = f"/static/audio/{os.path.basename(out_path)}"
+    except Exception as exc:
+        app.logger.exception("TTS failed in /reply/suggest-tts")
+        result["audio_url"] = None
 
     return jsonify(result)
 
@@ -986,12 +1274,30 @@ def confirm_start():
     data        = request.get_json(force=True) or {}
     action_text = data.get("action_text", "").strip()
     lang        = data.get("lang", Config.DEFAULT_LANGUAGE)
+    action_type = (data.get("action_type") or "").strip()
+    payload     = data.get("payload") or {}
 
     if not action_text:
         return jsonify({"error": "action_text is required"}), 400
 
+    valid, validation_message = _validate_action_payload(action_type, payload)
+    if not valid:
+        _log_user_action("confirm_start_rejected", status="error", details={"reason": validation_message})
+        return jsonify({"error": validation_message}), 400
+
+    challenge_id = _create_security_challenge(action_type, action_text, payload)
+
     audio_url = speak_confirmation(action_text, lang=lang)
-    return jsonify({"audio_url": audio_url, "action_text": action_text})
+    _log_user_action("confirm_start", details={"action_type": action_type})
+    return jsonify(
+        {
+            "audio_url": audio_url,
+            "action_text": action_text,
+            "challenge_id": challenge_id,
+            "requires_pin": True,
+            "pin_hint": "Speak or enter your PIN to continue",
+        }
+    )
 
 
 @app.route("/confirm/answer", methods=["POST"])
@@ -1007,13 +1313,58 @@ def confirm_answer():
     """
     data          = request.get_json(force=True) or {}
     transcription = data.get("transcription", "").strip()
+    challenge_id  = (data.get("challenge_id") or "").strip()
+    pin           = str(data.get("pin", "")).strip()
+
+    _cleanup_security_state()
+    challenges = session.get("action_challenges", {})
+    challenge = challenges.get(challenge_id)
+    if not challenge:
+        _log_user_action("confirm_answer_failed", status="error", details={"reason": "challenge_not_found"})
+        return jsonify({"error": "Invalid or expired challenge"}), 400
 
     confirmed = check_confirmation_answer(transcription)
-    return jsonify({
-        "confirmed"   : confirmed,
-        "transcription": transcription,
-        "result"      : "confirmed" if confirmed else "cancelled",
-    })
+    if not confirmed:
+        _log_user_action("confirm_rejected", details={"challenge_id": challenge_id})
+        return jsonify(
+            {
+                "confirmed": False,
+                "transcription": transcription,
+                "result": "cancelled",
+            }
+        )
+
+    if not verify_pin(pin):
+        challenge["attempts"] = int(challenge.get("attempts", 0)) + 1
+        challenges[challenge_id] = challenge
+        session["action_challenges"] = challenges
+        session.modified = True
+        remaining = max(0, Config.PIN_MAX_ATTEMPTS - challenge["attempts"])
+        _log_user_action("pin_verification_failed", status="error", details={"remaining": remaining})
+        return jsonify(
+            {
+                "confirmed": False,
+                "pin_verified": False,
+                "result": "pin_failed",
+                "remaining_attempts": remaining,
+            }
+        ), 401
+
+    challenge["confirmed"] = True
+    challenges[challenge_id] = challenge
+    session["action_challenges"] = challenges
+    token = _issue_confirmation_token(challenge_id)
+
+    _log_user_action("confirm_approved", details={"challenge_id": challenge_id})
+    return jsonify(
+        {
+            "confirmed": True,
+            "pin_verified": True,
+            "confirmation_token": token,
+            "transcription": transcription,
+            "result": "confirmed",
+        }
+    )
 
 
 # ── Feature 5: Language API ────────────────────────────────────────────────────

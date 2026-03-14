@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin Dashboard – VoiceMail</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>tailwind.config = { darkMode: 'class' }</script>
+  <style>
+    body        { background: linear-gradient(135deg, #0a1628 0%, #0f2a4a 50%, #0a1628 100%); }
+    .glass      { background: rgba(255,255,255,0.06); backdrop-filter: blur(18px); border: 1px solid rgba(255,255,255,0.12); }
+    .glass-dark { background: rgba(0,0,0,0.25);       backdrop-filter: blur(18px); border: 1px solid rgba(255,255,255,0.08); }
+    .tab-btn    { transition: all .2s; }
+    .tab-btn.active { background: rgba(99,179,237,0.2); border-bottom: 2px solid #63b3ed; color: #90cdf4; }
+    .tab-pane   { display: none; }
+    .tab-pane.active { display: block; }
+    .badge-admin { background: rgba(236,72,153,0.25); color: #f9a8d4; border: 1px solid rgba(236,72,153,0.4); }
+    .badge-user  { background: rgba(99,179,237,0.20); color: #90cdf4; border: 1px solid rgba(99,179,237,0.35); }
+    .status-success { color: #6ee7b7; }
+    .status-error   { color: #fca5a5; }
+    .btn { transition: all .15s; }
+    .btn:hover { filter: brightness(1.15); }
+    .spin { animation: spin .9s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: rgba(255,255,255,0.04); }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 4px; }
+  </style>
+</head>
+<body class="min-h-screen text-white font-sans">
+
+<!-- ═══ NAVBAR ═══════════════════════════════════════════════════════════════ -->
+<nav class="glass px-6 py-3 flex justify-between items-center sticky top-0 z-50 border-b border-white/10">
+  <div class="flex items-center gap-3">
+    <div class="w-7 h-7 rounded-lg bg-gradient-to-br from-pink-500 to-purple-600 flex items-center justify-center text-xs font-bold">A</div>
+    <span class="font-semibold tracking-wide">VoiceMail <span class="text-pink-300">Admin</span></span>
+  </div>
+  <div class="flex items-center gap-3">
+    <span class="text-xs text-gray-400 hidden sm:block">{{ user.email }}</span>
+    <span class="text-xs badge-admin px-2 py-0.5 rounded-full">admin</span>
+    <a href="/dashboard" class="btn text-xs glass px-3 py-1.5 rounded-lg hover:bg-white/10">← Dashboard</a>
+    <a href="/logout"    class="btn text-xs bg-red-600/30 hover:bg-red-600/50 px-3 py-1.5 rounded-lg">Logout</a>
+  </div>
+</nav>
+
+<!-- ═══ MAIN ══════════════════════════════════════════════════════════════════ -->
+<main class="max-w-7xl mx-auto px-4 py-8 space-y-6">
+
+  <!-- ── Header row ── -->
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+    <div>
+      <h1 class="text-2xl font-bold">Admin Dashboard</h1>
+      <p class="text-sm text-gray-400 mt-0.5">System monitoring &amp; user management</p>
+    </div>
+    <div class="flex items-center gap-2">
+      <span id="lastRefreshed" class="text-xs text-gray-500">–</span>
+      <button onclick="refreshAll()" id="refreshBtn"
+              class="btn text-xs glass px-3 py-1.5 rounded-lg flex items-center gap-1.5 hover:bg-white/10">
+        <svg id="refreshIcon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2"
+             viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round"
+             d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        Refresh
+      </button>
+      <a href="/admin/export/activity.json"
+         class="btn text-xs bg-emerald-700/30 hover:bg-emerald-600/40 px-3 py-1.5 rounded-lg">
+        ↓ Export Log
+      </a>
+    </div>
+  </div>
+
+  <!-- ── Metric cards ── -->
+  <section class="grid grid-cols-2 lg:grid-cols-5 gap-3">
+    <article class="glass rounded-2xl p-4">
+      <p class="text-[10px] text-gray-400 uppercase tracking-widest mb-1">Users</p>
+      <p id="mUsers" class="text-3xl font-bold">–</p>
+    </article>
+    <article class="glass rounded-2xl p-4">
+      <p class="text-[10px] text-gray-400 uppercase tracking-widest mb-1">Emails Sent</p>
+      <p id="mEmails" class="text-3xl font-bold text-sky-300">–</p>
+    </article>
+    <article class="glass rounded-2xl p-4">
+      <p class="text-[10px] text-gray-400 uppercase tracking-widest mb-1">Messages Sent</p>
+      <p id="mMessages" class="text-3xl font-bold text-violet-300">–</p>
+    </article>
+    <article class="glass rounded-2xl p-4">
+      <p class="text-[10px] text-gray-400 uppercase tracking-widest mb-1">System Events</p>
+      <p id="mEvents" class="text-3xl font-bold text-amber-200">–</p>
+    </article>
+    <article class="glass rounded-2xl p-4">
+      <p class="text-[10px] text-gray-400 uppercase tracking-widest mb-1">Error Events</p>
+      <p id="mErrors" class="text-3xl font-bold text-rose-300">–</p>
+    </article>
+  </section>
+
+  <!-- ── Tabs ── -->
+  <div class="glass rounded-2xl overflow-hidden">
+    <div class="flex border-b border-white/10 px-2 pt-2 gap-1">
+      <button onclick="switchTab('overview')"  id="tab-overview"  class="tab-btn active text-sm px-4 py-2 rounded-t-lg">Overview</button>
+      <button onclick="switchTab('users')"     id="tab-users"     class="tab-btn text-sm px-4 py-2 rounded-t-lg text-gray-400">Users</button>
+      <button onclick="switchTab('activity')"  id="tab-activity"  class="tab-btn text-sm px-4 py-2 rounded-t-lg text-gray-400">Activity Log</button>
+      <button onclick="switchTab('errors')"    id="tab-errors"    class="tab-btn text-sm px-4 py-2 rounded-t-lg text-gray-400">
+        Errors <span id="errorBadge" class="ml-1 bg-rose-600/50 text-rose-200 text-[10px] px-1.5 py-0.5 rounded-full hidden"></span>
+      </button>
+    </div>
+
+    <!-- ── TAB: Overview ── -->
+    <div id="pane-overview" class="tab-pane active p-5 space-y-4">
+      <p class="text-sm text-gray-400">Latest 20 events across all users.</p>
+      <div class="overflow-auto max-h-[450px]">
+        <table class="w-full text-sm">
+          <thead class="sticky top-0 glass-dark">
+            <tr class="border-b border-white/10 text-gray-300">
+              <th class="text-left py-2 pr-3 font-medium">Time</th>
+              <th class="text-left py-2 pr-3 font-medium">User</th>
+              <th class="text-left py-2 pr-3 font-medium">Role</th>
+              <th class="text-left py-2 pr-3 font-medium">Action</th>
+              <th class="text-left py-2 pr-3 font-medium">IP</th>
+              <th class="text-left py-2 font-medium">Status</th>
+            </tr>
+          </thead>
+          <tbody id="overviewRows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── TAB: Users ── -->
+    <div id="pane-users" class="tab-pane p-5 space-y-4">
+      <div class="flex items-center justify-between">
+        <p class="text-sm text-gray-400">All registered users. Click a role badge to toggle it.</p>
+        <input id="userSearch" oninput="filterUsers()" type="text" placeholder="Search by email…"
+               class="text-sm glass px-3 py-1.5 rounded-xl w-56 focus:outline-none focus:ring-1 focus:ring-sky-500/50 placeholder-gray-500" />
+      </div>
+      <div class="overflow-auto max-h-[450px]">
+        <table class="w-full text-sm">
+          <thead class="sticky top-0 glass-dark">
+            <tr class="border-b border-white/10 text-gray-300">
+              <th class="text-left py-2 pr-3 font-medium">Email</th>
+              <th class="text-left py-2 pr-3 font-medium">Role</th>
+              <th class="text-left py-2 pr-3 font-medium">Auth</th>
+              <th class="text-left py-2 pr-3 font-medium">First Seen</th>
+              <th class="text-left py-2 font-medium">Last Login</th>
+            </tr>
+          </thead>
+          <tbody id="userRows"></tbody>
+        </table>
+      </div>
+      <p id="userNote" class="text-xs text-yellow-300/70 hidden">Role change will take effect on the user's next login.</p>
+    </div>
+
+    <!-- ── TAB: Activity Log ── -->
+    <div id="pane-activity" class="tab-pane p-5 space-y-4">
+      <div class="flex flex-wrap gap-2 items-center">
+        <input id="actFilter" oninput="applyActivityFilter()" type="text" placeholder="Filter by user or action…"
+               class="text-sm glass px-3 py-1.5 rounded-xl w-56 focus:outline-none focus:ring-1 focus:ring-sky-500/50 placeholder-gray-500" />
+        <select id="statusFilter" onchange="applyActivityFilter()"
+                class="text-sm glass px-3 py-1.5 rounded-xl focus:outline-none focus:ring-1 focus:ring-sky-500/50 bg-transparent">
+          <option value="">All statuses</option>
+          <option value="success">Success</option>
+          <option value="error">Error</option>
+        </select>
+        <span id="actCount" class="text-xs text-gray-400"></span>
+      </div>
+      <div class="overflow-auto max-h-[420px]">
+        <table class="w-full text-sm">
+          <thead class="sticky top-0 glass-dark">
+            <tr class="border-b border-white/10 text-gray-300">
+              <th class="text-left py-2 pr-3 font-medium">Time</th>
+              <th class="text-left py-2 pr-3 font-medium">User</th>
+              <th class="text-left py-2 pr-3 font-medium">Action</th>
+              <th class="text-left py-2 pr-3 font-medium">Status</th>
+              <th class="text-left py-2 font-medium">Details</th>
+            </tr>
+          </thead>
+          <tbody id="activityRows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── TAB: Errors ── -->
+    <div id="pane-errors" class="tab-pane p-5 space-y-3">
+      <p class="text-sm text-gray-400">Recent error events from the activity log.</p>
+      <div id="errorCards" class="space-y-2 overflow-auto max-h-[450px]"></div>
+    </div>
+  </div>
+
+</main>
+
+<!-- ═══ TOAST ═════════════════════════════════════════════════════════════════ -->
+<div id="toast" class="fixed bottom-6 right-6 z-50 hidden text-sm px-4 py-2.5 rounded-xl shadow-xl transition-all"></div>
+
+<script>
+/* ── helpers ─────────────────────────────────────────────────────────────── */
+function esc(v) {
+  const d = document.createElement('div');
+  d.textContent = v == null ? '' : String(v);
+  return d.innerHTML;
+}
+function fmtTime(iso) {
+  if (!iso) return '–';
+  try { return new Date(iso).toLocaleString(); } catch { return iso; }
+}
+function fmtShort(iso) {
+  if (!iso) return '–';
+  try { return new Date(iso).toLocaleDateString(); } catch { return iso; }
+}
+
+let _toastTimer;
+function showToast(msg, ok) {
+  if (ok === undefined) ok = true;
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'fixed bottom-6 right-6 z-50 text-sm px-4 py-2.5 rounded-xl shadow-xl ' +
+    (ok ? 'bg-emerald-700/80' : 'bg-rose-700/80');
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(function() { t.classList.add('hidden'); }, 3500);
+}
+
+/* ── state ───────────────────────────────────────────────────────────────── */
+var _allActivity = [];
+var _allUsers    = [];
+
+/* ── tabs ────────────────────────────────────────────────────────────────── */
+function switchTab(name) {
+  ['overview','users','activity','errors'].forEach(function(t) {
+    document.getElementById('tab-'+t).classList.remove('active');
+    document.getElementById('tab-'+t).classList.add('text-gray-400');
+    document.getElementById('pane-'+t).classList.remove('active');
+  });
+  document.getElementById('tab-'+name).classList.add('active');
+  document.getElementById('tab-'+name).classList.remove('text-gray-400');
+  document.getElementById('pane-'+name).classList.add('active');
+}
+
+/* ── metrics ─────────────────────────────────────────────────────────────── */
+async function loadMetrics() {
+  const res  = await fetch('/admin/metrics');
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'metrics fetch failed');
+  const t = data.totals || {};
+  document.getElementById('mUsers').textContent    = t.users    != null ? t.users    : 0;
+  document.getElementById('mEmails').textContent   = t.emails_sent  != null ? t.emails_sent  : 0;
+  document.getElementById('mMessages').textContent = t.messages_sent != null ? t.messages_sent : 0;
+  document.getElementById('mEvents').textContent   = t.events   != null ? t.events   : 0;
+  document.getElementById('mErrors').textContent   = t.errors   != null ? t.errors   : 0;
+
+  const badge = document.getElementById('errorBadge');
+  if ((t.errors || 0) > 0) {
+    badge.textContent = t.errors;
+    badge.classList.remove('hidden');
+  } else {
+    badge.classList.add('hidden');
+  }
+
+  renderOverview(data.recent_activity || []);
+  renderErrors(data.recent_errors || []);
+}
+
+/* ── overview tab ────────────────────────────────────────────────────────── */
+function renderOverview(rows) {
+  const tbody = document.getElementById('overviewRows');
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="py-4 text-center text-gray-500">No activity yet.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.slice(0,20).map(function(r) { return (
+    '<tr class="border-b border-white/5 hover:bg-white/[.03]">' +
+    '<td class="py-2 pr-3 text-gray-400 whitespace-nowrap text-xs">' + esc(fmtTime(r.timestamp)) + '</td>' +
+    '<td class="py-2 pr-3 max-w-[140px] truncate">' + esc(r.user_email||'') + '</td>' +
+    '<td class="py-2 pr-3"><span class="text-xs px-1.5 py-0.5 rounded-full ' + (r.role==='admin'?'badge-admin':'badge-user') + '">' + esc(r.role||'') + '</span></td>' +
+    '<td class="py-2 pr-3">' + esc(r.action||'') + '</td>' +
+    '<td class="py-2 pr-3 text-gray-400 text-xs">' + esc(r.ip||'') + '</td>' +
+    '<td class="py-2 font-medium ' + (r.status==='error'?'status-error':'status-success') + '">' + esc(r.status||'') + '</td>' +
+    '</tr>'
+  ); }).join('');
+}
+
+/* ── users tab ───────────────────────────────────────────────────────────── */
+async function loadUsers() {
+  const res  = await fetch('/admin/users');
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'users fetch failed');
+  _allUsers = data;
+  renderUsers(_allUsers);
+}
+
+function filterUsers() {
+  const q = (document.getElementById('userSearch').value || '').toLowerCase();
+  renderUsers(q ? _allUsers.filter(function(u) { return (u.email||'').includes(q); }) : _allUsers);
+}
+
+function renderUsers(list) {
+  const tbody = document.getElementById('userRows');
+  if (!list.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="py-4 text-center text-gray-500">No users registered yet.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = list.map(function(u) { return (
+    '<tr class="border-b border-white/5 hover:bg-white/[.03]">' +
+    '<td class="py-2 pr-3">' + esc(u.email||'') + '</td>' +
+    '<td class="py-2 pr-3"><button onclick="toggleRole(\'' + esc(u.email) + '\',\'' + esc(u.role) + '\')" ' +
+      'class="btn text-xs ' + (u.role==='admin'?'badge-admin':'badge-user') + ' px-2 py-0.5 rounded-full cursor-pointer" title="Click to toggle role">' +
+      esc(u.role||'user') + '</button></td>' +
+    '<td class="py-2 pr-3 text-gray-400 text-xs">' + esc(u.auth_type||'') + '</td>' +
+    '<td class="py-2 pr-3 text-gray-400 text-xs">' + esc(fmtShort(u.first_seen_at)) + '</td>' +
+    '<td class="py-2 text-gray-400 text-xs">' + esc(fmtShort(u.last_login_at)) + '</td>' +
+    '</tr>'
+  ); }).join('');
+}
+
+async function toggleRole(email, currentRole) {
+  const newRole = currentRole === 'admin' ? 'user' : 'admin';
+  if (!confirm('Change role of "' + email + '" from "' + currentRole + '" to "' + newRole + '"?')) return;
+  try {
+    const res = await fetch('/admin/users/' + encodeURIComponent(email) + '/role', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: newRole }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'update failed');
+    showToast(email + ' → ' + newRole);
+    document.getElementById('userNote').classList.remove('hidden');
+    await loadUsers();
+  } catch (err) {
+    showToast(err.message, false);
+  }
+}
+
+/* ── activity tab ────────────────────────────────────────────────────────── */
+async function loadActivity() {
+  const res  = await fetch('/admin/activity?limit=200');
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'activity fetch failed');
+  _allActivity = data;
+  applyActivityFilter();
+}
+
+function applyActivityFilter() {
+  const q      = (document.getElementById('actFilter').value || '').toLowerCase();
+  const status = document.getElementById('statusFilter').value;
+  let rows = _allActivity;
+  if (q)      rows = rows.filter(function(r) { return (r.user_email||'').includes(q) || (r.action||'').includes(q); });
+  if (status) rows = rows.filter(function(r) { return r.status === status; });
+  document.getElementById('actCount').textContent = rows.length + ' event' + (rows.length === 1 ? '' : 's');
+  renderActivity(rows);
+}
+
+function renderActivity(rows) {
+  const tbody = document.getElementById('activityRows');
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="py-4 text-center text-gray-500">No matching events.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(function(r) {
+    const det = r.details && Object.keys(r.details).length ? JSON.stringify(r.details) : '–';
+    return '<tr class="border-b border-white/5 hover:bg-white/[.03]">' +
+      '<td class="py-2 pr-3 text-gray-400 text-xs whitespace-nowrap">' + esc(fmtTime(r.timestamp)) + '</td>' +
+      '<td class="py-2 pr-3 max-w-[130px] truncate text-xs">' + esc(r.user_email||'') + '</td>' +
+      '<td class="py-2 pr-3">' + esc(r.action||'') + '</td>' +
+      '<td class="py-2 pr-3 font-medium ' + (r.status==='error'?'status-error':'status-success') + '">' + esc(r.status||'') + '</td>' +
+      '<td class="py-2 text-gray-400 text-xs max-w-[180px] truncate" title="' + esc(det) + '">' + esc(det) + '</td>' +
+      '</tr>';
+  }).join('');
+}
+
+/* ── errors tab ──────────────────────────────────────────────────────────── */
+function renderErrors(errors) {
+  const el = document.getElementById('errorCards');
+  if (!errors.length) {
+    el.innerHTML = '<p class="text-sm text-gray-400 py-2">✓ No recent errors. System is healthy.</p>';
+    return;
+  }
+  el.innerHTML = errors.map(function(e) {
+    const det = e.details && Object.keys(e.details).length
+      ? '<pre class="text-[10px] text-gray-400 mt-1 overflow-x-auto">' + esc(JSON.stringify(e.details,null,2)) + '</pre>'
+      : '';
+    return '<article class="glass-dark rounded-xl p-3 border-l-2 border-rose-500/60">' +
+      '<div class="flex justify-between items-start">' +
+      '<p class="text-xs text-rose-200">' + esc(fmtTime(e.timestamp)) + '</p>' +
+      '<span class="text-xs text-gray-400">' + esc(e.ip||'') + '</span>' +
+      '</div>' +
+      '<p class="text-sm font-semibold mt-1">' + esc(e.action||'error') + '</p>' +
+      '<p class="text-xs text-gray-400 mt-0.5">by <span class="text-rose-300">' + esc(e.user_email||'anonymous') + '</span></p>' +
+      det +
+      '</article>';
+  }).join('');
+}
+
+/* ── master refresh ──────────────────────────────────────────────────────── */
+async function refreshAll() {
+  const icon = document.getElementById('refreshIcon');
+  icon.classList.add('spin');
+  try {
+    await Promise.all([loadMetrics(), loadUsers(), loadActivity()]);
+    document.getElementById('lastRefreshed').textContent =
+      'Refreshed ' + new Date().toLocaleTimeString();
+    showToast('Dashboard refreshed');
+  } catch (err) {
+    showToast('Refresh failed: ' + err.message, false);
+  } finally {
+    icon.classList.remove('spin');
+  }
+}
+
+/* ── boot ────────────────────────────────────────────────────────────────── */
+refreshAll();
+setInterval(refreshAll, 30000);
+</script>
+</body>
+</html>

@@ -36,10 +36,35 @@ python app.py
 # Open http://localhost:5000
 ```
 
+## 7. Milestone 4 security configuration
+Set these in `.env`:
+
+```bash
+ADMIN_EMAILS=admin@example.com
+VOICE_ACTION_PIN=2468
+PIN_MAX_ATTEMPTS=3
+ACTION_CHALLENGE_TTL=300
+ACTION_TOKEN_TTL=300
+```
+
+- `ADMIN_EMAILS` users can access `/admin`.
+- `VOICE_ACTION_PIN` is required before secure actions (email/message send).
+
+## 8. Run with Docker
+Build and run with Docker Compose:
+
+```bash
+docker compose up --build
+```
+
+Open `http://localhost:5000` in your browser.
+
 ## Quick command reference
 | Voice command | Action |
 |---|---|
 | "read my emails" | Fetches & reads inbox |
 | "send an email" | Guides to compose form |
+| "yes" (after compose) | Moves to PIN verification |
+| "2468" (or your PIN) | Completes secure send |
 | "help" | Lists available commands |
 | "logout" | Signs you out |

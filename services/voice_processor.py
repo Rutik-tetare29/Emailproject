@@ -20,6 +20,7 @@ from services.stt_whisper import transcribe, _model as _whisper_model
 from services.tts_engine import speak_to_file
 from services.email_service import fetch_emails, send_email
 from services.messaging_service import send_message as tg_send, read_latest_message as tg_read, get_all_messages as tg_all
+from services.security_admin import verify_pin
 from config import Config
 
 logger = logging.getLogger(__name__)
@@ -37,7 +38,7 @@ _INTENTS = {
         "show emails", "show email", "show inbox", "show my emails",
         "what emails", "how many emails", "emails in inbox",
         "check inbox", "check my inbox", "what is in my inbox",
-        "whats in my inbox", "inbox summary", "email summary",
+        "whats in my inbox", "inbox summary",
     ],
     "next_email": [
         # ── single-word shortcuts (must appear before multi-word so substring
@@ -120,6 +121,11 @@ _INTENTS = {
         "short version", "make it short", "shorten this", "shorten the email",
         "quick summary", "summarise", "summarise email",
         "summarise all", "summarise all emails",
+        # Natural spoken variants (Whisper often transcribes "summarize" as these)
+        "email summary", "mail summary", "summary email",
+        "email to summary", "email two summary", "email for summary",
+        "summary of this email", "summary of the email",
+        "this email summary", "the email summary",
     ],
     # ── Message summarization (telegram-mode only) ───────────────────────────
     "summarize_message": [
@@ -505,6 +511,30 @@ def _any_token_matches(text: str, targets: set, cutoff: float = 0.72) -> bool:
     return False
 
 
+# ── Navigation abort phrases ─────────────────────────────────────────────────
+# Multi-word phrases that cannot be a person's name and clearly signal the user
+# wants to switch away from an active compose flow.
+_NAV_ABORT_PHRASES = [
+    "read email", "read emails", "read mail", "read my email", "read my emails",
+    "list email", "list emails", "list my emails", "show email", "show emails",
+    "check email", "check emails", "check inbox", "check my inbox", "show inbox",
+    "open inbox", "open email", "get email", "fetch email",
+    "read messages", "check messages", "show messages", "read telegram",
+    "send email", "compose email", "new email", "write email",
+    "next email", "previous email", "read next", "read next email",
+    "summarize email", "email summary", "switch service", "switch to email",
+    "switch to telegram", "email mode", "telegram mode",
+]
+
+
+def _is_nav_abort(text: str) -> bool:
+    """Return True if text contains a multi-word navigation phrase that cannot
+    be a valid recipient name and signals the user wants to pivot away from
+    the current compose flow."""
+    lower = text.lower().strip()
+    return any(phrase in lower for phrase in _NAV_ABORT_PHRASES)
+
+
 def _detect_intent(text: str, session: dict) -> str:
     lower = text.lower().strip()
     if not lower:
@@ -538,6 +568,11 @@ def _detect_intent(text: str, session: dict) -> str:
             # like ‘Rutik’ don’t fuzzy-match ‘ruk’ and trigger a false cancel.
             if _is_cancel_content(lower):
                 return "cancel_message"
+            # Navigation override: multi-word phrase that can't be a person's name
+            if _is_nav_abort(lower):
+                session.pop("msg_compose", None)
+                session.modified = True
+                return _detect_intent(lower, session)
             return "send_message"  # any utterance = contact name
 
         elif step == "to_confirm":
@@ -547,6 +582,11 @@ def _detect_intent(text: str, session: dict) -> str:
                 return "cancel_message"
             if _any_token_matches(lower, _CONFIRM_EXACT):
                 return "send_message"  # confirmed
+            # Navigation override: user pivoted to a different service/action
+            if _is_nav_abort(lower):
+                session.pop("msg_compose", None)
+                session.modified = True
+                return _detect_intent(lower, session)
             return "send_message"  # treat as corrected name
 
         elif step == "text":
@@ -577,12 +617,22 @@ def _detect_intent(text: str, session: dict) -> str:
             # Capturing recipient address — exact-only cancel.
             if _is_cancel_content(lower):
                 return "cancel_email"
+            # Navigation override: phrase can't be an email address
+            if _is_nav_abort(lower):
+                session.pop("email_compose", None)
+                session.modified = True
+                return _detect_intent(lower, session)
             return "send_email"
 
         elif step == "subject":
             # Capturing subject — exact-only cancel.
             if _is_cancel_content(lower):
                 return "cancel_email"
+            # Navigation override: user pivoted away from compose
+            if _is_nav_abort(lower):
+                session.pop("email_compose", None)
+                session.modified = True
+                return _detect_intent(lower, session)
             return "send_email"
 
         elif step == "body":
@@ -687,6 +737,22 @@ def _detect_intent(text: str, session: dict) -> str:
         if re.search(r'\b(?:summarize|summarise)\b', lower):
             session.pop("_summarize_idx", None)
             session.pop("_summarize_all", None)
+            return "summarize_email"
+
+    # ── "email [N] summary" / "email to/two summary" — must come BEFORE the ──
+    # navigation regex so "email two summary" is not misread as "go to email 2".
+    if _service_allowed("summarize_email"):
+        if re.search(r'\bemail\b.*\bsummar|\bsummar.*\bemail\b', lower):
+            _sn = re.search(
+                r'\bemail\b.*?\b(one|two|three|four|five|1|2|3|4|5)\b', lower
+            )
+            if _sn:
+                session["_summarize_idx"] = _sum_num_map.get(_sn.group(1), 0)
+                session.pop("_summarize_all", None)
+                session.modified = True
+            else:
+                session.pop("_summarize_idx", None)
+                session.pop("_summarize_all", None)
             return "summarize_email"
 
     # ── "read email N" / "email number N" — positional navigation ──────────
@@ -1012,11 +1078,12 @@ def _handle_cancel_email(session: dict) -> str:
 def _handle_summarize_email(session: dict) -> str:
     """
     Summarize emails by voice:
-      - "summarize email"     → 1-line summary of currently loaded email
-      - "summarize email 2"   → 1-line summary of email #2 in cache
-      - "summarize all emails"→ 1-line summary of every loaded email
+      - "summarize email"     → full content summary of currently loaded email
+      - "summarize email 2"   → full content summary of email #2 in cache
+      - "summarize all emails"→ one-line subject+sender per email (full body
+                                 of each would be too long to read aloud)
     """
-    from services.summarizer import summarize_text
+    from services.summarizer import summarize_email as _summarize_email, summarize_text
 
     emails = _get_cached_emails(session)
     if not emails:
@@ -1025,22 +1092,32 @@ def _handle_summarize_email(session: dict) -> str:
             "Please say 'read emails' first to load your inbox."
         )
 
-    def _one_line(email: dict, number: int) -> str:
-        """Return a sharp 1-line summary string for a single email dict."""
-        body    = (email.get("body") or email.get("snippet") or "").strip()
-        subject = _tts_safe(email.get("subject", "No subject"))
-        sender  = _clean_sender(email.get("from", "Unknown"))
+    def _full_summary(email: dict, number: int) -> str:
+        """Return a full content summary for a single email dict."""
+        body   = (email.get("body") or email.get("snippet") or "").strip()
+        sender = _clean_sender(email.get("from", "Unknown"))
         if not body:
-            return f"Email {number} from {sender} has no readable content."
-        full_text = f"{subject}. {body}" if subject else body
-        summary   = summarize_text(full_text, mode="extractive")
-        return f"Email {number}: {summary}"
+            subject = _tts_safe(email.get("subject", "No subject"))
+            return f"Email {number} from {sender}: {subject}. No body content."
+        # Build a dict that matches summarize_email's expected shape
+        email_dict = {
+            "sender":  sender,
+            "subject": email.get("subject", ""),
+            "body":    body,
+        }
+        return f"Email {number}: " + _summarize_email(email_dict, mode="full")
+
+    def _one_line(email: dict, number: int) -> str:
+        """Return a short subject+sender line (used for 'summarize all')."""
+        sender  = _clean_sender(email.get("from", "Unknown"))
+        subject = _tts_safe(email.get("subject", "No subject"))
+        return f"Email {number} from {sender}: {subject}."
 
     # ── Summarize all loaded emails ────────────────────────────────────────
     if session.pop("_summarize_all", False):
         session.modified = True
         lines = [_one_line(e, i + 1) for i, e in enumerate(emails)]
-        intro = f"Here are one-line summaries of your {len(emails)} emails. "
+        intro = f"Here are summaries of your {len(emails)} emails. "
         return intro + " ".join(lines)
 
     # ── Summarize a specific email by number ───────────────────────────────
@@ -1053,17 +1130,16 @@ def _handle_summarize_email(session: dict) -> str:
                 f"{'s' if len(emails) != 1 else ''} loaded. "
                 "Please say a valid email number."
             )
-        # Jump the read pointer to the selected email so navigation stays consistent
         session["_email_read_idx"]   = specific
         session["_email_read_chunk"] = 0
         session.modified = True
-        return _one_line(emails[specific], specific + 1)
+        return _full_summary(emails[specific], specific + 1)
 
     # ── Summarize currently loaded email ─────────────────────────────────
     idx = session.get("_email_read_idx", 0)
     if idx >= len(emails):
         idx = 0
-    return _one_line(emails[idx], idx + 1)
+    return _full_summary(emails[idx], idx + 1)
 
 
 def _handle_summarize_message(session: dict) -> str:
@@ -1170,7 +1246,7 @@ def _handle_send_email(session: dict, transcription: str, eng_text: str = "") ->
     # ── Step 3: body ─────────────────────────────────────────────────────────
     elif step == "body":
         body    = transcription.strip()
-        session["email_compose"] = dict(compose, body=body, step="confirm")
+        session["email_compose"] = dict(compose, body=body, step="confirm", pin_attempts=0)
         session.modified = True
         to      = compose["to"]
         subject = compose["subject"]
@@ -1179,7 +1255,7 @@ def _handle_send_email(session: dict, transcription: str, eng_text: str = "") ->
             f"Ready to send. "
             f"To: {readable_to}. Subject: {subject}. "
             f"Message: {body}. "
-            f"Say yes or confirm to send, or say cancel to stop."
+            f"Say yes or confirm to continue to PIN verification, or say cancel to stop."
         )
 
     # ── Step 4: confirm ───────────────────────────────────────────────────────
@@ -1188,6 +1264,17 @@ def _handle_send_email(session: dict, transcription: str, eng_text: str = "") ->
         # confirmations like "हाँ", "oui", "sí" etc. are recognised.
         # Also check native phrases directly as offline fallback.
         if _any_token_matches(ctrl_lower, _CONFIRM_EXACT) or _is_native_confirm():
+            session["email_compose"] = dict(compose, step="pin")
+            session.modified = True
+            return "Security check: please say your PIN digits now."
+        else:
+            # Didn't confirm → treat as implicit cancel
+            session.pop("email_compose", None)
+            return "Email cancelled."
+
+    elif step == "pin":
+        pin_candidate = (eng_text or transcription).strip()
+        if verify_pin(pin_candidate):
             to      = compose["to"]
             subject = compose["subject"]
             body    = compose["body"]
@@ -1198,16 +1285,21 @@ def _handle_send_email(session: dict, transcription: str, eng_text: str = "") ->
                 if success:
                     readable_to = to.replace("@", " at ").replace(".", " dot ")
                     return f"Email sent successfully to {readable_to}!"
-                else:
-                    logger.error("Send email returned failure: %s", message)
-                    return f"Failed to send email. {message}. Please try again."
+                logger.error("Send email returned failure: %s", message)
+                return f"Failed to send email. {message}. Please try again."
             except Exception as exc:
                 logger.error("Send email exception: %s", exc)
                 return "Sorry, I could not send the email. Please check your settings and try again."
-        else:
-            # Didn't confirm → treat as implicit cancel
+
+        attempts = int(compose.get("pin_attempts", 0)) + 1
+        if attempts >= Config.PIN_MAX_ATTEMPTS:
             session.pop("email_compose", None)
-            return "Email cancelled."
+            session.modified = True
+            return "PIN verification failed too many times. Email cancelled."
+
+        session["email_compose"] = dict(compose, pin_attempts=attempts, step="pin")
+        session.modified = True
+        return "That PIN is not correct. Please say your PIN again."
 
     # fallback
     session.pop("email_compose", None)
@@ -1294,12 +1386,12 @@ def _handle_send_message(session: dict, transcription: str, eng_text: str = "") 
     # Step 2 — message text
     elif step == "text":
         text = transcription.strip()
-        session["msg_compose"] = dict(compose, text=text, step="confirm")
+        session["msg_compose"] = dict(compose, text=text, step="confirm", pin_attempts=0)
         session.modified = True
         return (
             f"Ready to send to {compose['to']}. "
             f"Message: {text}. "
-            f"Say yes to send, or say cancel to stop."
+            f"Say yes to continue to PIN verification, or say cancel to stop."
         )
 
     # Step 3 — confirm
@@ -1307,19 +1399,35 @@ def _handle_send_message(session: dict, transcription: str, eng_text: str = "") 
         # Use ctrl_lower (English-normalised) so native confirmations work.
         # Also check native phrases directly as offline fallback.
         if _any_token_matches(ctrl_lower, _CONFIRM_EXACT) or _is_native_confirm():
-            to   = compose["to"]
+            session["msg_compose"] = dict(compose, step="pin")
+            session.modified = True
+            return "Security check: please say your PIN digits now."
+        else:
+            session.pop("msg_compose", None)
+            session.modified = True
+            return "Message cancelled. What else can I help you with?"
+
+    elif step == "pin":
+        pin_candidate = (eng_text or transcription).strip()
+        if verify_pin(pin_candidate):
+            to = compose["to"]
             text = compose["text"]
             session.pop("msg_compose", None)
             session.modified = True
             result = tg_send(to, text)
             if result.get("success"):
                 return f"Message sent to {to} via Telegram!"
-            else:
-                return f"Could not send message. {result.get('message', '')}"
-        else:
+            return f"Could not send message. {result.get('message', '')}"
+
+        attempts = int(compose.get("pin_attempts", 0)) + 1
+        if attempts >= Config.PIN_MAX_ATTEMPTS:
             session.pop("msg_compose", None)
             session.modified = True
-            return "Message cancelled. What else can I help you with?"
+            return "PIN verification failed too many times. Message cancelled."
+
+        session["msg_compose"] = dict(compose, pin_attempts=attempts, step="pin")
+        session.modified = True
+        return "That PIN is not correct. Please say your PIN again."
 
     session.pop("msg_compose", None)
     return "Something went wrong. Message compose reset. Please try again."
@@ -1458,6 +1566,24 @@ def _handle_set_language(session: dict) -> str:
     return SWITCH_PHRASES.get(lang, f"Language switched to {lang}.")
 
 
+def _cleanup_old_audio_files(max_age_seconds: int = 600) -> None:
+    """Delete TTS output files (wav/mp3) in UPLOAD_FOLDER older than max_age_seconds."""
+    import time
+    try:
+        now = time.time()
+        for fname in os.listdir(Config.UPLOAD_FOLDER):
+            if not (fname.endswith(".wav") or fname.endswith(".mp3")):
+                continue
+            fpath = os.path.join(Config.UPLOAD_FOLDER, fname)
+            try:
+                if now - os.path.getmtime(fpath) > max_age_seconds:
+                    os.remove(fpath)
+            except OSError:
+                pass
+    except Exception:
+        pass
+
+
 def process_voice_command(audio_file: FileStorage, session: dict, choosing_service: bool = False) -> dict:
     """
     Accepts a Werkzeug FileStorage WAV upload, transcribes it,
@@ -1469,6 +1595,9 @@ def process_voice_command(audio_file: FileStorage, session: dict, choosing_servi
             "audio_url": str | None
         }
     """
+    # 0 — Opportunistic cleanup of stale TTS files (> 10 min old)
+    _cleanup_old_audio_files()
+
     # 1 — Save raw upload
     temp_path = os.path.join(Config.UPLOAD_FOLDER, f"input_{uuid.uuid4().hex}.wav")
     audio_file.save(temp_path)
@@ -1609,31 +1738,46 @@ def process_text_compose_input(field: str, value: str, session: dict) -> dict:
     elif field == "body":
         to      = compose.get("to", "")
         subject = compose.get("subject", "")
-        session["email_compose"] = dict(compose, body=value, step="confirm")
+        session["email_compose"] = dict(compose, body=value, step="confirm", pin_attempts=0)
         session.modified = True
         readable_to = to.replace("@", " at ").replace(".", " dot ")
         response_text = (
             f"Ready to send. To: {readable_to}. Subject: {subject}. "
-            f"Message: {value}. Say yes to confirm, or say cancel to stop."
+            f"Message: {value}. Say yes to continue to PIN verification, or say cancel to stop."
         )
 
     elif field == "confirm":
-        # value should be "yes" or similar — frontend already filtered "no"
-        to      = compose.get("to", "")
-        subject = compose.get("subject", "")
-        body_v  = compose.get("body", "")
-        session.pop("email_compose", None)
+        session["email_compose"] = dict(compose, step="pin")
         session.modified = True
-        try:
-            success, message = send_email(session, to, subject, body_v)
-            if success:
-                readable_to = to.replace("@", " at ").replace(".", " dot ")
-                response_text = f"Email sent successfully to {readable_to}!"
+        response_text = "Security check: type or say your PIN digits now."
+
+    elif field == "pin":
+        if verify_pin(value):
+            to      = compose.get("to", "")
+            subject = compose.get("subject", "")
+            body_v  = compose.get("body", "")
+            session.pop("email_compose", None)
+            session.modified = True
+            try:
+                success, message = send_email(session, to, subject, body_v)
+                if success:
+                    readable_to = to.replace("@", " at ").replace(".", " dot ")
+                    response_text = f"Email sent successfully to {readable_to}!"
+                else:
+                    response_text = f"Failed to send email. {message}. Please try again."
+            except Exception as exc:
+                logger.error("Text compose send error: %s", exc)
+                response_text = "Sorry, I could not send the email. Please check your settings."
+        else:
+            attempts = int(compose.get("pin_attempts", 0)) + 1
+            if attempts >= Config.PIN_MAX_ATTEMPTS:
+                session.pop("email_compose", None)
+                session.modified = True
+                response_text = "PIN verification failed too many times. Email cancelled."
             else:
-                response_text = f"Failed to send email. {message}. Please try again."
-        except Exception as exc:
-            logger.error("Text compose send error: %s", exc)
-            response_text = "Sorry, I could not send the email. Please check your settings."
+                session["email_compose"] = dict(compose, pin_attempts=attempts, step="pin")
+                session.modified = True
+                response_text = "Incorrect PIN. Please enter PIN again."
 
     else:
         response_text = "Unknown field."
@@ -1695,27 +1839,43 @@ def process_text_msg_input(field: str, value: str, session: dict) -> dict:
     elif field == "text":
         text = value.strip()
         to   = compose.get("to", "")
-        session["msg_compose"] = dict(compose, text=text, step="confirm")
+        session["msg_compose"] = dict(compose, text=text, step="confirm", pin_attempts=0)
         session.modified = True
         response_text = (
             f"Ready to send to {to}. "
-            f"Message: {text}. Say yes or type YES to confirm, or say cancel to stop."
+            f"Message: {text}. Say yes or type YES to continue to PIN verification, or say cancel to stop."
         )
 
     elif field == "confirm":
-        to   = compose.get("to", "")
-        text = compose.get("text", "")
-        session.pop("msg_compose", None)
+        session["msg_compose"] = dict(compose, step="pin")
         session.modified = True
-        try:
-            result = tg_send(to, text)
-            if result.get("success"):
-                response_text = f"Telegram message sent to {to}!"
+        response_text = "Security check: type or say your PIN digits now."
+
+    elif field == "pin":
+        if verify_pin(value):
+            to = compose.get("to", "")
+            text = compose.get("text", "")
+            session.pop("msg_compose", None)
+            session.modified = True
+            try:
+                result = tg_send(to, text)
+                if result.get("success"):
+                    response_text = f"Telegram message sent to {to}!"
+                else:
+                    response_text = f"Could not send. {result.get('message', '')}. Please try again."
+            except Exception as exc:
+                logger.error("Text msg send error: %s", exc)
+                response_text = "Sorry, I could not send the message. Please try again."
+        else:
+            attempts = int(compose.get("pin_attempts", 0)) + 1
+            if attempts >= Config.PIN_MAX_ATTEMPTS:
+                session.pop("msg_compose", None)
+                session.modified = True
+                response_text = "PIN verification failed too many times. Message cancelled."
             else:
-                response_text = f"Could not send. {result.get('message', '')}. Please try again."
-        except Exception as exc:
-            logger.error("Text msg send error: %s", exc)
-            response_text = "Sorry, I could not send the message. Please try again."
+                session["msg_compose"] = dict(compose, pin_attempts=attempts, step="pin")
+                session.modified = True
+                response_text = "Incorrect PIN. Please enter PIN again."
 
     else:
         response_text = "Unknown field."

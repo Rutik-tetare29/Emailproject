@@ -139,9 +139,12 @@ def _extract_gmail_body(payload: dict) -> str:
 def _send_gmail_api(session: dict, to_addr: str, subject: str, body: str) -> tuple[bool, str]:
     try:
         service = _gmail_service(session)
+        from_addr = session.get("user", {}).get("email", "")
         msg = MIMEText(body)
         msg["to"] = to_addr
         msg["subject"] = subject
+        if from_addr:
+            msg["from"] = from_addr
         raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
         service.users().messages().send(
             userId="me", body={"raw": raw}
@@ -247,7 +250,6 @@ def _get_body(msg) -> str:
     if html:
         return _html_to_text(html)
     return "(No message body)"
-    return ""
 
 
 # ── SMTP (App Password) ────────────────────────────────────────────────────────

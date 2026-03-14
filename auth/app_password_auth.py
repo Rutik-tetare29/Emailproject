@@ -6,27 +6,30 @@ import imaplib
 from flask import Blueprint, request, jsonify, session, redirect, url_for
 from flask_login import login_user, UserMixin
 from config import Config
+from services.security_admin import resolve_role, register_user
 
 apppass_auth_bp = Blueprint("apppass_auth", __name__)
 
 
 # ── User model ────────────────────────────────────────────────────────────────
 class AppPasswordUser(UserMixin):
-    def __init__(self, email: str):
+    def __init__(self, email: str, role: str | None = None):
         self.id = email
         self.email = email
         self.name = email.split("@")[0]
         self.auth_type = "app_password"
+        self.role = role or resolve_role(email)
 
     @staticmethod
     def from_session(data: dict) -> "AppPasswordUser":
-        return AppPasswordUser(email=data["email"])
+        return AppPasswordUser(email=data["email"], role=data.get("role"))
 
     def to_dict(self) -> dict:
         return {
             "email": self.email,
             "name": self.name,
             "auth_type": "app_password",
+            "role": self.role,
             # NOTE: we never store the raw password in session —
             # it is kept only in the encrypted session cookie under "app_pass"
         }
@@ -53,6 +56,7 @@ def app_password_login():
         return jsonify({"error": f"Connection failed: {exc}"}), 503
 
     user = AppPasswordUser(email=email)
+    register_user(user.email, auth_type="app_password", role=user.role)
     session["user"] = user.to_dict()
     # Store encrypted password separately in session (Flask signs the cookie)
     session["app_pass"] = password

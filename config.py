@@ -15,6 +15,10 @@ class Config:
     UPLOAD_FOLDER = os.path.join(BASE_DIR, "static", "audio")
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+    # Data storage
+    DATA_DIR = os.path.join(BASE_DIR, "data")
+    os.makedirs(DATA_DIR, exist_ok=True)
+
     # Google OAuth
     GOOGLE_CLIENT_SECRETS_FILE = os.getenv(
         "GOOGLE_CLIENT_SECRETS_FILE",
@@ -88,3 +92,21 @@ class Config:
     # "simple" uses the built-in rule-based summarizer (no extra dependencies).
     # "transformers" uses HuggingFace — run: pip install transformers torch
     SUMMARIZATION_MODE = os.getenv("SUMMARIZATION_MODE", "simple")  # "simple" | "transformers"
+
+    # ── Milestone 4: Security / RBAC / Admin ────────────────────────────────
+    # Comma-separated admin emails: "admin@example.com,owner@example.com"
+    ADMIN_EMAILS_RAW = os.getenv("ADMIN_EMAILS", "")
+    ADMIN_EMAILS = {
+        e.strip().lower()
+        for e in ADMIN_EMAILS_RAW.split(",")
+        if e.strip()
+    }
+    DEFAULT_USER_ROLE = os.getenv("DEFAULT_USER_ROLE", "user")
+
+    # Voice PIN used for high-risk actions (send email / send message)
+    VOICE_ACTION_PIN = os.getenv("VOICE_ACTION_PIN", "2468")
+    PIN_MAX_ATTEMPTS = int(os.getenv("PIN_MAX_ATTEMPTS", "3"))
+
+    # Challenge / token expiry windows (seconds)
+    ACTION_CHALLENGE_TTL = int(os.getenv("ACTION_CHALLENGE_TTL", "300"))
+    ACTION_TOKEN_TTL = int(os.getenv("ACTION_TOKEN_TTL", "300"))

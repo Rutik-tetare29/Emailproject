@@ -319,16 +319,18 @@ async function processAndSend(buffers) {
 
     // ── Show compose step label or generic done status ────────────────────────
     const emailStepLabels = {
-      to:      '📧 E-mail Step 1/4 · Say the address — or type it below',
-      subject: '📝 E-mail Step 2/4 · Say the subject (or type below)',
-      body:    '💬 E-mail Step 3/4 · Say your message (or type below)',
-      confirm: '✅ E-mail Step 4/4 · Say "yes" to send · "cancel" to abort',
+      to:      '📧 E-mail Step 1/5 · Say the address — or type it below',
+      subject: '📝 E-mail Step 2/5 · Say the subject (or type below)',
+      body:    '💬 E-mail Step 3/5 · Say your message (or type below)',
+      confirm: '✅ E-mail Step 4/5 · Say "yes" to continue or "cancel" to abort',
+      pin:     '🔐 E-mail Step 5/5 · Say or type PIN digits to send',
     };
     const msgStepLabels2 = {
-      to:         '👤 Telegram Step 1/4 · Say the contact name (or type below)',
-      to_confirm: '❓ Telegram Step 2/4 · Say "yes" to confirm · or say the correct name',
-      text:       '💬 Telegram Step 3/4 · Say your message (or type below)',
-      confirm:    '✅ Telegram Step 4/4 · Say "yes" to send · "cancel" to abort',
+      to:         '👤 Telegram Step 1/5 · Say the contact name (or type below)',
+      to_confirm: '❓ Telegram Step 2/5 · Say "yes" to confirm · or say the correct name',
+      text:       '💬 Telegram Step 3/5 · Say your message (or type below)',
+      confirm:    '✅ Telegram Step 4/5 · Say "yes" to continue · "cancel" to abort',
+      pin:        '🔐 Telegram Step 5/5 · Say or type PIN digits to send',
     };
     const intentLabels = {
       summarize_email:   '📋 Summary ready · Say "next", "summarize email" or "send email"',
@@ -353,7 +355,9 @@ async function processAndSend(buffers) {
     }
 
   } catch (err) {
-    setStatus('Network error: ' + err.message, 'error');
+    const msg = 'Network error: ' + err.message;
+    setStatus(msg, 'error');
+    $('responseText').textContent = msg;
     console.error(err);
     _autoRestart(1500);
   }
@@ -606,7 +610,8 @@ function _updateTypeInBox() {
       to:      'recipient@gmail.com',
       subject: 'Email subject…',
       body:    'Your message…',
-      confirm: 'Type YES to confirm or NO to cancel',
+      confirm: 'Type YES to continue or NO to cancel',
+      pin:     'Type your PIN digits',
     };
     input.placeholder = placeholders[_emailStep] || '';
     box.classList.remove('hidden');
@@ -624,7 +629,8 @@ function _updateMsgTypeInBox() {
       to:         'Contact name (e.g. Vaibhav)',
       to_confirm: 'Type YES to confirm or type a different name',
       text:       'Your message\u2026',
-      confirm:    'Type YES to send or NO to cancel',
+      confirm:    'Type YES to continue or NO to cancel',
+      pin:        'Type your PIN digits',
     };
     input.placeholder = placeholders[_msgStep] || '';
     box.classList.remove('hidden');
@@ -717,10 +723,11 @@ async function submitMsgTypeIn() {
     _msgStep = data.msg_step || null;
     _updateMsgTypeInBox();
     const msgStepLabels = {
-      to:         '\uD83D\uDC64 Telegram Step 1/4 \u00B7 Contact name (or type below)',
-      to_confirm: '\u2753 Telegram Step 2/4 \u00B7 Say "yes" to confirm \u00B7 or type the correct name',
-      text:       '\uD83D\uDCAC Telegram Step 3/4 \u00B7 Your message (or type below)',
-      confirm:    '\u2705 Telegram Step 4/4 \u00B7 Say "yes" to send \u00B7 "cancel" to abort',
+      to:         '\uD83D\uDC64 Telegram Step 1/5 \u00B7 Contact name (or type below)',
+      to_confirm: '\u2753 Telegram Step 2/5 \u00B7 Say "yes" to confirm \u00B7 or type the correct name',
+      text:       '\uD83D\uDCAC Telegram Step 3/5 \u00B7 Your message (or type below)',
+      confirm:    '\u2705 Telegram Step 4/5 \u00B7 Say "yes" to continue \u00B7 "cancel" to abort',
+      pin:        '\uD83D\uDD10 Telegram Step 5/5 \u00B7 Say or type PIN digits to send',
     };
     const statusMsg = _msgStep ? (msgStepLabels[_msgStep] || _msgStep) : ('Done \u2022 send_message');
     setStatus(statusMsg, _msgStep ? 'recording' : 'done');
@@ -747,16 +754,18 @@ function _handleComposeResponse(data) {
   _updateMsgTypeInBox();
 
   const emailStepLabels3 = {
-    to:      '📧 E-mail Step 1/4 · Say the address — or type it below',
-    subject: '📝 E-mail Step 2/4 · Say the subject (or type below)',
-    body:    '💬 E-mail Step 3/4 · Say your message (or type below)',
-    confirm: '✅ E-mail Step 4/4 · Say "yes" to send · "cancel" to abort',
+    to:      '📧 E-mail Step 1/5 · Say the address — or type it below',
+    subject: '📝 E-mail Step 2/5 · Say the subject (or type below)',
+    body:    '💬 E-mail Step 3/5 · Say your message (or type below)',
+    confirm: '✅ E-mail Step 4/5 · Say "yes" to continue · "cancel" to abort',
+    pin:     '🔐 E-mail Step 5/5 · Say or type PIN digits to send',
   };
   const msgStepLabels3 = {
-    to:         '👤 Telegram Step 1/4 · Contact name (or type below)',
-    to_confirm: '❓ Telegram Step 2/4 · Say "yes" to confirm · or type the correct name',
-    text:       '💬 Telegram Step 3/4 · Your message (or type below)',
-    confirm:    '✅ Telegram Step 4/4 · Say "yes" to send · "cancel" to abort',
+    to:         '👤 Telegram Step 1/5 · Contact name (or type below)',
+    to_confirm: '❓ Telegram Step 2/5 · Say "yes" to confirm · or type the correct name',
+    text:       '💬 Telegram Step 3/5 · Your message (or type below)',
+    confirm:    '✅ Telegram Step 4/5 · Say "yes" to continue · "cancel" to abort',
+    pin:        '🔐 Telegram Step 5/5 · Say or type PIN digits to send',
   };
   const activeStep3   = _emailStep || _msgStep;
   const activeLabels3 = _emailStep ? emailStepLabels3 : (_msgStep ? msgStepLabels3 : {});

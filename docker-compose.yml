@@ -1,0 +1,10 @@
+version: '3.9'
+services:
+  voice-email-app:
+    build: .
+    container_name: voice-email-app
+    ports:
+      - "5000:5000"
+    env_file:
+      - .env
+    restart: unless-stopped

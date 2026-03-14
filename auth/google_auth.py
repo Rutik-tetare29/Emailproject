@@ -12,6 +12,7 @@ from google.auth.transport.requests import Request
 import google.oauth2.id_token
 import google.auth.transport.requests as google_requests
 from config import Config
+from services.security_admin import resolve_role, register_user
 
 google_auth_bp = Blueprint("google_auth", __name__)
 
@@ -20,12 +21,13 @@ google_auth_bp = Blueprint("google_auth", __name__)
 class GoogleUser(UserMixin):
     """Lightweight user object stored in the Flask session."""
 
-    def __init__(self, email: str, name: str, credentials_dict: dict):
+    def __init__(self, email: str, name: str, credentials_dict: dict, role: str | None = None):
         self.id = email
         self.email = email
         self.name = name
         self.credentials_dict = credentials_dict  # serialised google Credentials
         self.auth_type = "google"
+        self.role = role or resolve_role(email)
 
     # Rebuild from session dict
     @staticmethod
@@ -34,6 +36,7 @@ class GoogleUser(UserMixin):
             email=data["email"],
             name=data["name"],
             credentials_dict=data["credentials"],
+            role=data.get("role"),
         )
 
     def to_dict(self) -> dict:
@@ -42,6 +45,7 @@ class GoogleUser(UserMixin):
             "name": self.name,
             "credentials": self.credentials_dict,
             "auth_type": "google",
+            "role": self.role,
         }
 
     def get_credentials(self) -> Credentials:
@@ -94,7 +98,10 @@ def google_login():
 
 @google_auth_bp.route("/login/google/callback")
 def oauth_callback():
-    state = session.get("oauth_state", "")
+    # If the app restarted between the login redirect and Google's callback the
+    # session is empty and oauth_state is gone.  Fall back to the state Google
+    # echoes back in the query-string so the token exchange still succeeds.
+    state = session.get("oauth_state") or request.args.get("state", "")
     flow = _build_flow(state=state)
 
     try:
@@ -121,6 +128,7 @@ def oauth_callback():
         name=id_info.get("name", id_info["email"]),
         credentials_dict=_creds_to_dict(creds),
     )
+    register_user(user.email, auth_type="google", role=user.role)
     session["user"] = user.to_dict()
     login_user(user, remember=True)
 

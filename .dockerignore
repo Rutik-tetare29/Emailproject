@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+*.wav
+.env
+venv/
+.git/
+.gitignore
+static/audio/
