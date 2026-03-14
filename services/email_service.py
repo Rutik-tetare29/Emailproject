@@ -63,6 +63,8 @@ def send_email(session: dict, to_addr: str, subject: str, body: str) -> tuple[bo
 def _gmail_service(session: dict):
     from auth.google_auth import GoogleUser
     user = GoogleUser.from_session(session["user"])
+    if not user.credentials_dict:
+        raise RuntimeError("Google account needs reconnect for Gmail access")
     creds = user.get_credentials()
     return build("gmail", "v1", credentials=creds, cache_discovery=False)
 
@@ -164,6 +166,7 @@ def _decode_header_value(value: str) -> str:
 
 
 def _fetch_imap(email_addr: str, password: str, limit: int = MAX_EMAILS) -> list[dict]:
+    mail = None
     try:
         mail = imaplib.IMAP4_SSL(Config.GMAIL_IMAP_HOST)
         mail.login(email_addr, password)
@@ -188,13 +191,18 @@ def _fetch_imap(email_addr: str, password: str, limit: int = MAX_EMAILS) -> list
                 "body": body,
                 "snippet": body[:200] if body else "",
             })
-
-        mail.logout()
         return emails
 
     except Exception as exc:
         logger.error("IMAP fetch error: %s", exc)
         return []
+
+    finally:
+        if mail:
+            try:
+                mail.logout()
+            except Exception:
+                pass
 
 
 class _HTMLStripper(HTMLParser):

@@ -36,7 +36,13 @@ import logging
 import pyttsx3
 
 from config import Config
-from services.tts_engine import speak_to_file  # reuse existing engine
+from services.tts_engine import (
+    speak_to_file,
+    _split_sentences,
+    _make_engine,
+    _read_wav_data,
+    _write_wav,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -125,23 +131,56 @@ def speak_text_lang(text: str, lang: str = "en", out_path: str = None) -> str:
         speak_to_file(text, out_path)
         return out_path
 
-    # For other languages, use a fresh pyttsx3 engine with the matching voice
+    # For other languages, use chunking + PCM stitching to avoid SAPI5 truncation
     if out_path is None:
         out_path = os.path.join(
             Config.UPLOAD_FOLDER, f"tts_{lang}_{uuid.uuid4().hex}.wav"
         )
 
-    engine = pyttsx3.init()
+    chunks    = _split_sentences(text)
+    tmp_dir   = Config.UPLOAD_FOLDER
+    tmp_paths: list[str] = []
+
+    engine = _make_engine()
     try:
-        engine.setProperty("rate", 155)
-        engine.setProperty("volume", 0.95)
         voice_id = _get_voice_for_lang(engine, lang)
         if voice_id:
             engine.setProperty("voice", voice_id)
-        engine.save_to_file(text, out_path)
-        engine.runAndWait()
+        for chunk in chunks:
+            tmp = os.path.join(tmp_dir, f"_tts_chunk_{uuid.uuid4().hex}.wav")
+            tmp_paths.append(tmp)
+            engine.save_to_file(chunk, tmp)
+            engine.runAndWait()
     finally:
         engine.stop()
+
+    # Stitch chunk WAVs into one output file
+    all_pcm    = b""
+    wav_params = {}
+    for tp in tmp_paths:
+        if not os.path.exists(tp) or os.path.getsize(tp) == 0:
+            continue
+        try:
+            params, pcm = _read_wav_data(tp)
+            if pcm:
+                all_pcm += pcm
+                if not wav_params:
+                    wav_params = params
+        finally:
+            try:
+                os.remove(tp)
+            except Exception:
+                pass
+
+    if all_pcm and wav_params:
+        _write_wav(
+            out_path, all_pcm,
+            wav_params.get("channels", 1),
+            wav_params.get("sample_rate", 22050),
+            wav_params.get("bit_depth", 16),
+        )
+
+
 
     return out_path
 

@@ -25,7 +25,7 @@
     .email-card:hover { background: rgba(255,255,255,0.12); }
   </style>
 </head>
-<body class="min-h-screen text-white">
+<body class="min-h-screen text-white" data-announce-login-success="{{ 1 if announce_login_success else 0 }}">
 
   <!-- Navbar -->
   <nav class="glass px-6 py-4 flex justify-between items-center border-b border-white/10">
@@ -483,9 +483,50 @@
 
     // Last summary audio URL
     let _summaryAudioUrl = { email: null, message: null };
+    const _announceLoginSuccess = document.body.dataset.announceLoginSuccess === '1';
+
+    function _playLoginSuccessAudio(url) {
+      const audio = new Audio(url);
+      audio.play().catch(() => {
+        const retry = () => {
+          audio.play().catch(() => {});
+          window.removeEventListener('click', retry);
+          window.removeEventListener('keydown', retry);
+          window.removeEventListener('touchstart', retry);
+        };
+        window.addEventListener('click', retry, { once: true });
+        window.addEventListener('keydown', retry, { once: true });
+        window.addEventListener('touchstart', retry, { once: true });
+      });
+    }
+
+    async function _announceSuccessfulSignIn() {
+      if (!_announceLoginSuccess) return;
+      try {
+        const res = await fetch('/login/success-audio', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lang: _currentLang }),
+        });
+        const data = await res.json();
+        if (res.ok && data.audio_url) {
+          _playLoginSuccessAudio(data.audio_url);
+          return;
+        }
+      } catch {}
+      if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance('Sign in successful. Welcome to VoiceMail.');
+        utterance.rate = 0.95;
+        utterance.pitch = 1.0;
+        utterance.volume = 1.0;
+        window.speechSynthesis.speak(utterance);
+      }
+    }
 
     document.addEventListener('DOMContentLoaded', () => {
       applyTranslations(_currentLang);   // apply stored language immediately
+      _announceSuccessfulSignIn();
       loadEmails();
       _syncLangWithServer();
       loadContacts();

@@ -4,6 +4,8 @@ Stores OAuth credentials in Flask session so they survive requests.
 """
 from __future__ import annotations
 import json
+import os
+import secrets
 from flask import Blueprint, redirect, request, session, url_for
 from flask_login import login_user, UserMixin
 from google_auth_oauthlib.flow import Flow
@@ -15,6 +17,57 @@ from config import Config
 from services.security_admin import resolve_role, register_user
 
 google_auth_bp = Blueprint("google_auth", __name__)
+_GOOGLE_DEVICE_TOKENS_FILE = os.path.join(Config.DATA_DIR, "google_device_tokens.json")
+
+
+def _load_device_tokens() -> dict:
+    try:
+        with open(_GOOGLE_DEVICE_TOKENS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
+    except FileNotFoundError:
+        return {}
+    except Exception:
+        return {}
+
+
+def _save_device_tokens(tokens: dict) -> None:
+    tmp_path = f"{_GOOGLE_DEVICE_TOKENS_FILE}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(tokens, f, indent=2)
+    os.replace(tmp_path, _GOOGLE_DEVICE_TOKENS_FILE)
+
+
+def _remember_google_user(user: "GoogleUser") -> tuple[str, str]:
+    device_token = (request.cookies.get("google_device_token") or "").strip() or secrets.token_urlsafe(32)
+    tokens = _load_device_tokens()
+    tokens[device_token] = {
+        "email": user.email,
+        "name": user.name,
+        "auth_type": "google",
+        "role": user.role,
+    }
+    _save_device_tokens(tokens)
+    return device_token, user.email
+
+
+def _restore_google_user_from_device() -> "GoogleUser | None":
+    device_token = (request.cookies.get("google_device_token") or "").strip()
+    if not device_token:
+        return None
+    tokens = _load_device_tokens()
+    user_data = tokens.get(device_token)
+    if not user_data or user_data.get("auth_type") != "google":
+        return None
+    try:
+        return GoogleUser(
+            email=user_data["email"],
+            name=user_data.get("name", user_data["email"]),
+            credentials_dict={},
+            role=user_data.get("role"),
+        )
+    except Exception:
+        return None
 
 
 # ── User model ────────────────────────────────────────────────────────────────
@@ -87,11 +140,32 @@ def _creds_to_dict(creds: Credentials) -> dict:
 @google_auth_bp.route("/login/google")
 def google_login():
     flow = _build_flow()
-    auth_url, state = flow.authorization_url(
-        access_type="offline",
-        include_granted_scopes="true",
-        prompt="consent",
-    )
+    fast_login = request.args.get("fast") == "1"
+    session["voice_google_login"] = fast_login
+
+    if fast_login:
+        restored_user = _restore_google_user_from_device()
+        if restored_user:
+            register_user(restored_user.email, auth_type="google", role=restored_user.role)
+            session["user"] = restored_user.to_dict()
+            login_user(restored_user, remember=True)
+            session["announce_login_success"] = True
+            return redirect(url_for("dashboard"))
+
+    auth_kwargs = {
+        "access_type": "offline",
+        "include_granted_scopes": "true",
+    }
+    if fast_login:
+        # If token-restore was not possible, let user explicitly choose account.
+        # Do not send stale login_hint from cookies, which can prefill a wrong email.
+        auth_kwargs["prompt"] = "select_account"
+    else:
+        # First-time login: keep the explicit consent flow so refresh tokens
+        # continue to be issued reliably.
+        auth_kwargs["prompt"] = "consent"
+
+    auth_url, state = flow.authorization_url(**auth_kwargs)
     session["oauth_state"] = state
     return redirect(auth_url)
 
@@ -131,5 +205,22 @@ def oauth_callback():
     register_user(user.email, auth_type="google", role=user.role)
     session["user"] = user.to_dict()
     login_user(user, remember=True)
+    if session.pop("voice_google_login", False):
+        session["announce_login_success"] = True
 
-    return redirect(url_for("dashboard"))
+    device_token, remembered_email = _remember_google_user(user)
+    response = redirect(url_for("dashboard"))
+    response.set_cookie(
+        "google_device_token",
+        device_token,
+        max_age=60 * 60 * 24 * 180,
+        httponly=True,
+        samesite="Lax",
+    )
+    response.set_cookie(
+        "last_google_email",
+        remembered_email,
+        max_age=60 * 60 * 24 * 180,
+        samesite="Lax",
+    )
+    return response

@@ -53,6 +53,7 @@ Thumbs.db
 # ── Logs ──────────────────────────────────────────────────────────────────────
 *.log
 logs/
+data/google_device_tokens.json
 
 # ── Uploaded / temp audio ─────────────────────────────────────────────────────
 uploads/

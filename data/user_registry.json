@@ -4,13 +4,13 @@
     "role": "user",
     "auth_type": "google",
     "first_seen_at": "2026-03-14T12:56:09.067172+00:00",
-    "last_login_at": "2026-03-14T12:56:09.067172+00:00"
+    "last_login_at": "2026-03-14T15:47:31.153059+00:00"
   },
   {
     "email": "rutiktetare206@gmail.com",
     "role": "admin",
     "auth_type": "google",
     "first_seen_at": "2026-03-14T12:57:31.230040+00:00",
-    "last_login_at": "2026-03-14T13:14:08.457193+00:00"
+    "last_login_at": "2026-03-14T15:49:35.568024+00:00"
   }
 ]

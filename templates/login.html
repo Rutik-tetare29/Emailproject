@@ -38,6 +38,32 @@
       from { width: 100%; } to { width: 0%; }
     }
     .countdown-bar { animation: countdown-shrink linear forwards; }
+    @keyframes mic-breathe {
+      0%   { transform: scale(1); box-shadow: 0 0 0 0 rgba(196,181,253,0.35); }
+      70%  { transform: scale(1.04); box-shadow: 0 0 0 10px rgba(196,181,253,0); }
+      100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(196,181,253,0); }
+    }
+    .header-mic-btn {
+      width: 78px;
+      height: 78px;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid rgba(196,181,253,0.45);
+      background: radial-gradient(circle at 30% 25%, rgba(255,255,255,0.22), rgba(139,92,246,0.18));
+      box-shadow: 0 10px 30px rgba(15, 12, 41, 0.45);
+      animation: mic-breathe 2.2s ease-in-out infinite;
+      transition: transform 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+    }
+    .header-mic-btn:hover {
+      transform: translateY(-1px) scale(1.06);
+      background: radial-gradient(circle at 30% 25%, rgba(255,255,255,0.30), rgba(139,92,246,0.26));
+      box-shadow: 0 14px 34px rgba(15, 12, 41, 0.52);
+    }
+    .header-mic-btn:active {
+      transform: scale(0.98);
+    }
   </style>
 </head>
 <body class="min-h-screen flex items-center justify-center text-white p-4">
@@ -45,13 +71,21 @@
 
     <!-- Header -->
     <div class="text-center mb-8">
-      <div class="text-5xl mb-3">&#127897;&#65039;</div>
+      <button id="header-mic-btn" onclick="startLoginAgentMic()"
+        title="Start voice login"
+        aria-label="Start voice login"
+        class="header-mic-btn text-5xl mb-2">
+        <span aria-hidden="true">&#127897;&#65039;</span>
+      </button>
+      <p class="text-[11px] text-purple-200/85 font-semibold tracking-wide mb-3">
+        TAP MIC TO START VOICE LOGIN
+      </p>
       <h1 class="text-3xl font-extrabold text-purple-300">VoiceMail</h1>
       <p class="text-gray-400 mt-1">Sign in to your email assistant</p>
     </div>
 
     <!-- Tabs -->
-    <div class="flex rounded-xl overflow-hidden border border-white/10 mb-6">
+    <div id="auth-tabs" class="flex rounded-xl overflow-hidden border border-white/10 mb-6">
       <button id="tab-google" onclick="switchTab('google')"
         class="flex-1 py-2 text-sm font-semibold tab-active transition-all">
         Google OAuth
@@ -59,10 +93,6 @@
       <button id="tab-app" onclick="switchTab('app')"
         class="flex-1 py-2 text-sm font-semibold transition-all">
         App Password
-      </button>
-      <button id="tab-voice" onclick="switchTab('voice')"
-        class="flex-1 py-2 text-sm font-semibold transition-all">
-        &#127908; Voice
       </button>
     </div>
 
@@ -134,6 +164,16 @@
 
     <!-- Voice Login Panel -->
     <div id="panel-voice" class="hidden" role="region" aria-label="Voice Login">
+      <div class="flex items-center justify-between mb-4">
+        <p class="text-xs font-bold tracking-[0.2em] text-purple-200/80 uppercase">
+          Voice Login Active
+        </p>
+        <button onclick="closeLoginAgentMic()"
+          class="px-3 py-1 rounded-full border border-white/15 bg-white/5 text-xs font-semibold text-gray-200 hover:bg-white/10 transition-all"
+          aria-label="Close voice login">
+          Close
+        </button>
+      </div>
       <p class="text-gray-400 text-sm text-center mb-4">
         Log in hands-free &mdash; no keyboard needed.
       </p>
@@ -142,12 +182,12 @@
       <div class="flex justify-center items-center gap-4 mb-5">
         <div class="flex items-center gap-2">
           <div id="vstep-dot-1" class="w-3 h-3 rounded-full bg-purple-500 transition-all"></div>
-          <span id="vstep-lbl-1" class="text-xs font-semibold text-purple-300">Step 1: Email</span>
+          <span id="vstep-lbl-1" class="text-xs font-semibold text-purple-300">Step 1: Service</span>
         </div>
         <div class="w-8 h-px bg-white/20"></div>
         <div class="flex items-center gap-2">
           <div id="vstep-dot-2" class="w-3 h-3 rounded-full bg-white/20 transition-all"></div>
-          <span id="vstep-lbl-2" class="text-xs font-semibold text-white/30">Step 2: Password</span>
+          <span id="vstep-lbl-2" class="text-xs font-semibold text-white/30">Step 2: Credentials</span>
         </div>
       </div>
 
@@ -247,19 +287,41 @@
   </div>
 
   <script>
+    var ACTIVE_LOGIN_TAB = 'google';
+
     function switchTab(tab) {
-      ['google', 'app', 'voice'].forEach(function(t) {
+      ACTIVE_LOGIN_TAB = tab;
+      ['google', 'app'].forEach(function(t) {
         document.getElementById('tab-' + t).classList.toggle('tab-active', t === tab);
         document.getElementById('panel-' + t).classList.toggle('hidden', t !== tab);
       });
+      document.getElementById('panel-voice').classList.add('hidden');
+      document.getElementById('auth-tabs').classList.remove('hidden');
       document.getElementById('error-msg').classList.add('hidden');
-      if (tab === 'voice') {
-        vReset();
-        // Speak welcome instructions for blind users after a short delay
-        setTimeout(function() {
-          _vSpeak('Voice login. Step one: press the microphone button and say your Gmail address clearly.');
-        }, 500);
-      }
+    }
+
+    function startLoginAgentMic() {
+      document.getElementById('auth-tabs').classList.add('hidden');
+      document.getElementById('panel-google').classList.add('hidden');
+      document.getElementById('panel-app').classList.add('hidden');
+      document.getElementById('panel-voice').classList.remove('hidden');
+      document.getElementById('error-msg').classList.add('hidden');
+      vReset();
+      setTimeout(function() {
+        _vSpeak('Voice login. First, say your login service: Google, or app password.', function() {
+          setTimeout(vStartRecord, 450);
+        });
+      }, 350);
+    }
+
+    function closeLoginAgentMic() {
+      if (VL.ynRecog) { try { VL.ynRecog.abort(); } catch(e){} VL.ynRecog = null; }
+      if (window.speechSynthesis) window.speechSynthesis.cancel();
+      _vStopRecording();
+      _vStopCountdown();
+      document.getElementById('panel-voice').classList.add('hidden');
+      document.getElementById('auth-tabs').classList.remove('hidden');
+      switchTab(ACTIVE_LOGIN_TAB);
     }
 
     function togglePasswordVisibility() {
@@ -407,8 +469,8 @@
       if (window.speechSynthesis) window.speechSynthesis.cancel();
       _vStopRecording();
       _vStopCountdown();
-      VL.step = 'email'; VL.emailVal = ''; VL.passVal = ''; VL.correcting = false;
-      _vSetInstruction('Press the mic to start');
+      VL.step = 'service'; VL.emailVal = ''; VL.passVal = ''; VL.correcting = false;
+      _vSetInstruction('Press the mic, then say Google or App Password');
       _vSetStatus('', '');
       _vSetStepDots(1); _vHideCaptured(); _vHideActions();
       _vPulse('purple', false); _vPulse('green', false);
@@ -428,21 +490,24 @@
       if (VL.recording) { _vStopRecording(); return; }
       if (VL.ynRecog) { try { VL.ynRecog.abort(); } catch(e){} VL.ynRecog = null; }
       _vPulse('green', false); _vHideActions(); _vHideCaptured();
+      var isService = VL.step === 'service';
       var isEmail   = VL.step === 'email';
       var isCorrect = VL.step === 'email-correct';
       _vSetInstruction('Get ready... mic opens after prompt');
       _vSetStatus('Get Ready', 'info');
       _vSetMicEnabled(false);
       // SPEAK FIRST — mic only opens after TTS finishes so prompt is not recorded
-      var prompt = isEmail
-        ? 'Say your Gmail address now.'
-        : isCorrect
-          ? 'Say your correction. For example: add e before 206. Or: replace tetar with tetary.'
-          : 'Say your 16-character App Password now. Say each letter clearly, one at a time. For example: A, B, C, D. You may also say letter names like alpha, bravo, or bee, see, dee.';
-      _vSpeak(prompt, function() { _vBeginCapture(isEmail, isCorrect); });
+      var prompt = isService
+        ? 'Which login service do you want? Say Google, or app password.'
+        : isEmail
+          ? 'Say your Gmail address now.'
+          : isCorrect
+            ? 'Say your correction. For example: add e before 206. Or: replace tetar with tetary.'
+            : 'Say your 16-character App Password now. Say each letter clearly, one at a time. For example: A, B, C, D. You may also say letter names like alpha, bravo, or bee, see, dee.';
+      _vSpeak(prompt, function() { _vBeginCapture(isService, isEmail, isCorrect); });
     }
 
-    async function _vBeginCapture(isEmail, isCorrect) {
+    async function _vBeginCapture(isService, isEmail, isCorrect) {
       try {
         await _vEnsureCtx();
         VL.micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
@@ -458,12 +523,14 @@
         _vPulse('purple', true);
         _vSetMicIcon('\u23F9');
         _vSetMicEnabled(true);
-        var secs = isEmail ? VL_MAX_SECS_EMAIL : isCorrect ? 8 : VL_MAX_SECS_PASS;
-        _vSetInstruction(isEmail
-          ? 'Recording... say your Gmail address (' + secs + 's)'
-          : isCorrect
-            ? 'Recording... say your correction command'
-            : 'Recording ' + secs + 's — say all 16 letters clearly, one at a time');
+        var secs = isService ? 7 : isEmail ? VL_MAX_SECS_EMAIL : isCorrect ? 8 : VL_MAX_SECS_PASS;
+        _vSetInstruction(isService
+          ? 'Recording... say Google or App Password'
+          : isEmail
+            ? 'Recording... say your Gmail address (' + secs + 's)'
+            : isCorrect
+              ? 'Recording... say your correction command'
+              : 'Recording ' + secs + 's — say all 16 letters clearly, one at a time');
         _vSetStatus(isCorrect ? 'Say Correction' : 'Recording ' + secs + 's', isCorrect ? 'yn' : 'rec');
         _vStartCountdown(secs);
         VL.recTimer = setTimeout(_vStopRecording, secs * 1000);
@@ -548,6 +615,31 @@
         }
         return;
       }
+      if (VL.step === 'service') {
+        var svc = _vDetectLoginService(normalized);
+        if (svc === 'google') {
+          _vSetStatus('Google OAuth', 'yn');
+          _vSetInstruction('Opening Google sign-in...');
+          _vSpeak('Google selected. Opening Google sign in now.', function() {
+            setTimeout(function() { window.location.href = '/login/google?fast=1'; }, 450);
+          });
+          return;
+        }
+        if (svc === 'app') {
+          VL.step = 'email';
+          _vSetStepDots(1);
+          _vSetStatus('App Password', 'info');
+          _vSetInstruction('App Password selected. Say your Gmail address');
+          _vSpeak('App Password selected. Now say your Gmail address clearly.',
+            function(){ setTimeout(vStartRecord, 500); });
+          return;
+        }
+        _vSetStatus('Not Understood', 'rec');
+        _vSetInstruction('Please say Google or App Password');
+        _vSpeak('I did not catch the service. Please say Google, or app password.',
+          function(){ setTimeout(vStartRecord, 500); });
+        return;
+      }
       // ── Voice correction command ──────────────────────────────────────────
       if (VL.step === 'email-correct') {
         _vApplyCorrection(normalized);
@@ -574,6 +666,13 @@
           'Say yes to log in or no to try again.',
           function(){setTimeout(_vListenYesNo, 400);});
       }
+    }
+
+    function _vDetectLoginService(text) {
+      var t = (text || '').toLowerCase();
+      if (/google|goggle|gogle|oauth|o auth|login with google|sign in with google/.test(t)) return 'google';
+      if (/app\s*password|password|manual|gmail\s*password|login with password|app pass/.test(t)) return 'app';
+      return null;
     }
 
     var _YES     = new Set(['yes','yeah','yep','yah','ya','confirm',

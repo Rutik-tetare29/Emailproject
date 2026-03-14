@@ -28,7 +28,8 @@ let _emailStep      = null;    // current step of voice-guided email compose (or
 let _msgStep         = null;    // current step of voice-guided Telegram message compose
 let _activeService   = null;    // 'email' | 'telegram' | null — chosen by user at first tap
 let _choosingService = false;   // true while waiting for user to say which service
-let _wsRecog         = null;    // Web Speech API recognizer used during TTS playback
+let _wsRecog           = null;    // Web Speech API recognizer used during TTS playback
+let _consecutiveErrors = 0;       // consecutive server/network errors — stops restart loop at 3
 // Initialize from localStorage immediately so the FIRST request already uses
 // the stored language — not hardcoded 'en'.  Falls back to 'en' if not set.
 let _voiceLang       = localStorage.getItem('voicemail_lang') || 'en';
@@ -242,11 +243,17 @@ async function processAndSend(buffers) {
     const data = await res.json();
 
     if (!res.ok) {
+      _consecutiveErrors++;
       setStatus('Server error: ' + (data.error || 'Unknown'), 'error');
-      _autoRestart(1500);   // pause a bit so user can read the error, then retry
+      if (_consecutiveErrors < 3) {
+        _autoRestart(1500);
+      } else {
+        setStatus('⚠️ Repeated errors — tap 🎤 to retry', 'error');
+      }
       return;
     }
 
+    _consecutiveErrors = 0;
     $('transcriptionText').textContent = data.transcription || '(nothing recognised)';
     $('responseText').textContent      = data.response_text || '';
 
@@ -355,11 +362,16 @@ async function processAndSend(buffers) {
     }
 
   } catch (err) {
+    _consecutiveErrors++;
     const msg = 'Network error: ' + err.message;
     setStatus(msg, 'error');
     $('responseText').textContent = msg;
     console.error(err);
-    _autoRestart(1500);
+    if (_consecutiveErrors < 3) {
+      _autoRestart(1500);
+    } else {
+      setStatus('⚠️ Repeated errors — tap 🎤 to retry', 'error');
+    }
   }
 }
 

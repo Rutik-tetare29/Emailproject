@@ -337,7 +337,7 @@ def _normalize_app_password(raw: str) -> str:
 def voice_login_transcribe():
     """
     Transcribes a WAV blob for the login page (no auth required).
-    Form fields: audio=<wav>, step=email|password
+    Form fields: audio=<wav>, step=service|email|password
     Returns: { "text": "<raw>", "normalized": "<cleaned>" }
     """
     from services.stt_whisper import transcribe
@@ -360,7 +360,7 @@ def voice_login_transcribe():
 
     if step == "email":
         normalized = _normalize_email_address(raw_text)
-    elif step in ("email-correct", "yesno"):
+    elif step in ("email-correct", "yesno", "service"):
         # Return raw lowercased text for client-side matching
         normalized = raw_text.lower().strip()
     else:
@@ -696,7 +696,13 @@ def voice_correct_email():
 def dashboard():
     role = _current_role()
     _log_user_action("dashboard_viewed", details={"role": role})
-    return render_template("dashboard.html", user=current_user, is_admin=(role == "admin"))
+    announce_login_success = bool(session.pop("announce_login_success", False))
+    return render_template(
+        "dashboard.html",
+        user=current_user,
+        is_admin=(role == "admin"),
+        announce_login_success=announce_login_success,
+    )
 
 
 @app.route("/admin")
@@ -1433,6 +1439,24 @@ def language_tts_demo():
         return jsonify({"error": "TTS failed"}), 500
     return jsonify({"audio_url": f"/static/audio/{os.path.basename(out_path)}"})
 
+
+
+@app.route("/login/success-audio", methods=["POST"])
+@login_required
+def login_success_audio():
+    """
+    Generate a one-time TTS clip announcing successful sign-in.
+    Returns: { "audio_url": str }
+    """
+    data = request.get_json(silent=True) or {}
+    lang = (data.get("lang") or session.get("language") or Config.DEFAULT_LANGUAGE).strip().lower()
+    text = "Sign in successful. Welcome to VoiceMail."
+    out_path = os.path.join(Config.UPLOAD_FOLDER, f"login_success_{uuid.uuid4().hex}.wav")
+    try:
+        speak_text_lang(text, lang=lang, out_path=out_path)
+    except Exception as exc:
+        return jsonify({"error": f"TTS failed: {exc}"}), 500
+    return jsonify({"audio_url": f"/static/audio/{os.path.basename(out_path)}"})
 
 if __name__ == "__main__":
     app.run(debug=app.config["DEBUG"], port=5000)

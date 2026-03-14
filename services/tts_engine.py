@@ -100,34 +100,44 @@ def _write_wav(path: str, pcm: bytes, channels: int, sample_rate: int, bit_depth
         f.write(pcm)
 
 
-def speak_to_file(text: str) -> str:
+def speak_to_file(text: str, out_path: str = None) -> str:
     """
     Convert text to speech, save to a WAV file, and return the file path.
     Splits long text into chunks to avoid pyttsx3/SAPI5 truncation on Windows.
-    Returns an empty string on error.
+
+    Parameters
+    ----------
+    text     : str  Text to speak.
+    out_path : str  Optional explicit output path. If None a temp file is
+                    created in Config.UPLOAD_FOLDER.
+
+    Returns
+    -------
+    str  Path of the WAV file produced, or empty string on error.
     """
     if not text:
         return ""
 
-    # ── Safety: strip SSML/XML angle-bracket tags before they reach SAPI5 ────
-    # SAPI5 treats < > as SSML markup; a malformed tag silently aborts all audio.
-    text = re.sub(r'<[^>]*>', ' ', text)          # remove <tag> blocks
-    text = text.replace('<', ' ').replace('>', ' ')  # kill any strays
+    # Strip SSML/XML tags — SAPI5 treats them as markup and aborts silently
+    text = re.sub(r'<[^>]*>', ' ', text)
+    text = text.replace('<', ' ').replace('>', ' ')
     text = re.sub(r'\s+', ' ', text).strip()
 
     chunks   = _split_sentences(text)
     tmp_dir  = Config.UPLOAD_FOLDER
-    out_path = os.path.join(tmp_dir, f"tts_{uuid.uuid4().hex}.wav")
+    if out_path is None:
+        out_path = os.path.join(tmp_dir, f"tts_{uuid.uuid4().hex}.wav")
     tmp_paths: list[str] = []
 
     try:
+        # Create the engine ONCE for all chunks to avoid COM overhead per-chunk
+        engine = _make_engine()
         for chunk in chunks:
             tmp = os.path.join(tmp_dir, f"_tts_chunk_{uuid.uuid4().hex}.wav")
             tmp_paths.append(tmp)
-            engine = _make_engine()
             engine.save_to_file(chunk, tmp)
             engine.runAndWait()
-            engine.stop()
+        engine.stop()
 
         # ── Stitch all chunk WAVs into one file ───────────────────────────────
         all_pcm    = b""
