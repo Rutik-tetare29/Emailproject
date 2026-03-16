@@ -139,9 +139,30 @@
               <th class="text-left py-2 pr-3 font-medium">Auth</th>
               <th class="text-left py-2 pr-3 font-medium">First Seen</th>
               <th class="text-left py-2 font-medium">Last Login</th>
+              <th class="text-left py-2 font-medium">Actions</th>
             </tr>
           </thead>
           <tbody id="userRows"></tbody>
+              <!-- Edit User Modal -->
+              <div id="editUserModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40 hidden">
+                <div class="glass-dark rounded-xl p-6 w-[350px] max-w-full">
+                  <h2 class="text-lg font-bold mb-3">Edit User</h2>
+                  <form id="editUserForm" class="space-y-3">
+                    <input type="hidden" id="editUserEmail" name="email" />
+                    <div>
+                      <label class="block text-xs mb-1">Role</label>
+                      <select id="editUserRole" name="role" class="w-full glass px-2 py-1 rounded-lg">
+                        <option value="user">User</option>
+                        <option value="admin">Admin</option>
+                      </select>
+                    </div>
+                    <div class="flex gap-2 mt-4">
+                      <button type="submit" class="btn bg-emerald-700/80 px-4 py-1.5 rounded-lg text-sm">Save</button>
+                      <button type="button" onclick="closeEditUserModal()" class="btn bg-gray-700/60 px-4 py-1.5 rounded-lg text-sm">Cancel</button>
+                    </div>
+                  </form>
+                </div>
+              </div>
         </table>
       </div>
       <p id="userNote" class="text-xs text-yellow-300/70 hidden">Role change will take effect on the user's next login.</p>
@@ -199,6 +220,72 @@ const ADMIN_BOOTSTRAP = JSON.parse(
   document.getElementById('admin-bootstrap').textContent || '{}'
 );
 
+/* ── User Table Render ───────────────────────────────────────────────────── */
+function renderUserRows(users) {
+  const tbody = document.getElementById('userRows');
+  tbody.innerHTML = '';
+  users.forEach(user => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="py-2 pr-3">${esc(user.email)}</td>
+      <td class="py-2 pr-3"><span class="badge-${user.role} px-2 py-0.5 rounded-full cursor-pointer">${esc(user.role)}</span></td>
+      <td class="py-2 pr-3">${esc(user.auth_type)}</td>
+      <td class="py-2 pr-3">${fmtShort(user.first_seen_at)}</td>
+      <td class="py-2 pr-3">${fmtShort(user.last_login_at)}</td>
+      <td class="py-2">
+        <button class="btn bg-sky-700/70 px-2 py-1 rounded text-xs mr-2" onclick="openEditUserModal('${user.email}', '${user.role}')">Edit</button>
+        <button class="btn bg-rose-700/70 px-2 py-1 rounded text-xs" onclick="removeUser('${user.email}')">Remove</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function openEditUserModal(email, role) {
+  document.getElementById('editUserEmail').value = email;
+  document.getElementById('editUserRole').value = role;
+  document.getElementById('editUserModal').classList.remove('hidden');
+}
+function closeEditUserModal() {
+  document.getElementById('editUserModal').classList.add('hidden');
+}
+document.getElementById('editUserForm').onsubmit = async function(e) {
+  e.preventDefault();
+  const email = document.getElementById('editUserEmail').value;
+  const role = document.getElementById('editUserRole').value;
+  const res = await fetch('/admin/user/edit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, role })
+  });
+  const data = await res.json();
+  showToast(data.message, data.success);
+  closeEditUserModal();
+  refreshUsers();
+};
+
+async function removeUser(email) {
+  if (!confirm('Remove user ' + email + '?')) return;
+  const res = await fetch('/admin/user/remove', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email })
+  });
+  const data = await res.json();
+  showToast(data.message, data.success);
+  refreshUsers();
+}
+
+async function refreshUsers() {
+  const users = await fetchJson('/admin/users', [], 'User list');
+  _allUsers = Array.isArray(users) ? users : [];
+  renderUsers(_allUsers);
+}
+
+// Initial render
+if (ADMIN_BOOTSTRAP && ADMIN_BOOTSTRAP.users) {
+  renderUserRows(ADMIN_BOOTSTRAP.users);
+}
 /* ── helpers ─────────────────────────────────────────────────────────────── */
 function esc(v) {
   const d = document.createElement('div');
@@ -312,7 +399,7 @@ function filterUsers() {
 function renderUsers(list) {
   const tbody = document.getElementById('userRows');
   if (!list.length) {
-    tbody.innerHTML = '<tr><td colspan="5" class="py-4 text-center text-gray-500">No users registered yet.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="py-4 text-center text-gray-500">No users registered yet.</td></tr>';
     return;
   }
   tbody.innerHTML = list.map(function(u) { return (
@@ -323,7 +410,11 @@ function renderUsers(list) {
       esc(u.role||'user') + '</button></td>' +
     '<td class="py-2 pr-3 text-gray-400 text-xs">' + esc(u.auth_type||'') + '</td>' +
     '<td class="py-2 pr-3 text-gray-400 text-xs">' + esc(fmtShort(u.first_seen_at)) + '</td>' +
-    '<td class="py-2 text-gray-400 text-xs">' + esc(fmtShort(u.last_login_at)) + '</td>' +
+    '<td class="py-2 pr-3 text-gray-400 text-xs">' + esc(fmtShort(u.last_login_at)) + '</td>' +
+    '<td class="py-2 text-xs">' +
+      '<button class="btn bg-sky-700/70 px-2 py-1 rounded mr-2" onclick="openEditUserModal(\'' + esc(u.email) + '\',\'' + esc(u.role) + '\')">Edit</button>' +
+      '<button class="btn bg-rose-700/70 px-2 py-1 rounded" onclick="removeUser(\'' + esc(u.email) + '\')">Delete</button>' +
+    '</td>' +
     '</tr>'
   ); }).join('');
 }

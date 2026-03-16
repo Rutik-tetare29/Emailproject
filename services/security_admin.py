@@ -3,6 +3,7 @@ import hmac
 import json
 import os
 import re
+import threading
 from datetime import datetime, timezone
 from typing import Any
 
@@ -11,6 +12,7 @@ from services.profile_service import verify_profile_pin
 
 _ACTIVITY_LOG_PATH = os.path.join(Config.DATA_DIR, "activity_log.json")
 _USER_REGISTRY_PATH = os.path.join(Config.DATA_DIR, "user_registry.json")
+_IO_LOCK = threading.RLock()
 
 
 def _utc_now() -> datetime:
@@ -26,16 +28,37 @@ def _ensure_file(path: str, default: Any) -> None:
 
 def _read_json(path: str, default: Any):
     _ensure_file(path, default)
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return default
+    backup_path = path + ".bak"
+
+    with _IO_LOCK:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            try:
+                with open(backup_path, "r", encoding="utf-8") as f:
+                    value = json.load(f)
+                _write_json(path, value)
+                return value
+            except Exception:
+                return default
 
 
 def _write_json(path: str, value: Any) -> None:
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(value, f, indent=2)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp_path = path + ".tmp"
+    backup_path = path + ".bak"
+
+    with _IO_LOCK:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(value, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+
+        os.replace(tmp_path, path)
+
+        with open(backup_path, "w", encoding="utf-8") as f:
+            json.dump(value, f, indent=2)
 
 
 def resolve_role(email: str) -> str:
@@ -141,6 +164,22 @@ def update_user_role(email: str, new_role: str) -> bool:
     if not existing:
         return False
     existing["role"] = new_role
+    _write_json(_USER_REGISTRY_PATH, users)
+    return True
+
+
+def remove_user(email: str) -> bool:
+    """Remove a user from the registry. Returns True if found and removed."""
+    email = (email or "").strip().lower()
+    if not email:
+        return False
+
+    users = _read_json(_USER_REGISTRY_PATH, [])
+    before = len(users)
+    users = [u for u in users if (u.get("email") or "").strip().lower() != email]
+    if len(users) == before:
+        return False
+
     _write_json(_USER_REGISTRY_PATH, users)
     return True
 

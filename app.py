@@ -753,6 +753,45 @@ def admin_users():
     return jsonify(get_users())
 
 
+@app.route("/admin/user/edit", methods=["POST"])
+@login_required
+@admin_required
+def admin_user_edit():
+    data = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+    role = (data.get("role") or "user").strip().lower()
+    if not email:
+        return jsonify({"success": False, "message": "Email required"}), 400
+    if role not in ("user", "admin"):
+        return jsonify({"success": False, "message": "Role must be user or admin"}), 400
+
+    updated = update_user_role(email, role)
+    if not updated:
+        return jsonify({"success": False, "message": "User not found"}), 404
+
+    _log_user_action("admin_user_edited", details={"target": email, "new_role": role})
+    return jsonify({"success": True, "message": f"User {email} updated to {role}"})
+
+
+@app.route("/admin/user/remove", methods=["POST"])
+@login_required
+@admin_required
+def admin_user_remove():
+    data = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+    if not email:
+        return jsonify({"success": False, "message": "Email required"}), 400
+
+    from services.security_admin import remove_user
+
+    removed = remove_user(email)
+    if not removed:
+        return jsonify({"success": False, "message": "User not found"}), 404
+
+    _log_user_action("admin_user_removed", details={"target": email})
+    return jsonify({"success": True, "message": f"User {email} removed"})
+
+
 @app.route("/admin/users/<path:email>/role", methods=["PUT"])
 @login_required
 @admin_required
