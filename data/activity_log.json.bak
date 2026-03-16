@@ -738,5 +738,41 @@
     "status": "success",
     "ip": "127.0.0.1",
     "details": {}
+  },
+  {
+    "timestamp": "2026-03-16T13:14:55.637620+00:00",
+    "user_email": "rutiktetare206@gmail.com",
+    "role": "admin",
+    "action": "admin_metrics_viewed",
+    "status": "success",
+    "ip": "127.0.0.1",
+    "details": {}
+  },
+  {
+    "timestamp": "2026-03-16T13:15:41.737601+00:00",
+    "user_email": "rutiktetare206@gmail.com",
+    "role": "admin",
+    "action": "admin_metrics_viewed",
+    "status": "success",
+    "ip": "127.0.0.1",
+    "details": {}
+  },
+  {
+    "timestamp": "2026-03-16T13:16:41.458121+00:00",
+    "user_email": "rutiktetare206@gmail.com",
+    "role": "admin",
+    "action": "admin_users_viewed",
+    "status": "success",
+    "ip": "127.0.0.1",
+    "details": {}
+  },
+  {
+    "timestamp": "2026-03-16T13:16:41.512564+00:00",
+    "user_email": "rutiktetare206@gmail.com",
+    "role": "admin",
+    "action": "admin_activity_viewed",
+    "status": "success",
+    "ip": "127.0.0.1",
+    "details": {}
   }
 ]

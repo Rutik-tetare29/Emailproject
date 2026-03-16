@@ -59,6 +59,9 @@ docker compose up --build
 
 Open `http://localhost:5000` in your browser.
 
+## License
+This project is released under the MIT License. See the `LICENSE` file in the project root.
+
 ## 9. Production Docker and Deploy Checklist
 Use these before deploying to a server or cloud container platform:
 

@@ -274,3 +274,13 @@ Result: improved resilience against log/history loss during crashes or interrupt
 
 ## 14. Final Conclusion
 The VoiceMail project is feature-complete for its defined milestone scope and now includes a production-oriented container baseline. Core workflows (voice, email, messaging, admin governance, security controls) are implemented and deployable. The project is ready for Docker-based deployment with recommended security and infrastructure hardening steps for internet-facing production.
+
+---
+
+## 15. License and Compliance
+This project is distributed under the MIT License.
+
+MIT compliance added in the repository includes:
+- A root `LICENSE` file with standard MIT terms.
+- Permission for reuse, modification, distribution, and private/commercial use.
+- Required preservation of the copyright and permission notice in substantial copies.
