@@ -188,7 +188,17 @@
 <!-- ═══ TOAST ═════════════════════════════════════════════════════════════════ -->
 <div id="toast" class="fixed bottom-6 right-6 z-50 hidden text-sm px-4 py-2.5 rounded-xl shadow-xl transition-all"></div>
 
+<script id="admin-bootstrap" type="application/json">{{ {
+  "metrics": initial_metrics,
+  "users": initial_users,
+  "activity": initial_activity
+}|tojson }}</script>
+
 <script>
+const ADMIN_BOOTSTRAP = JSON.parse(
+  document.getElementById('admin-bootstrap').textContent || '{}'
+);
+
 /* ── helpers ─────────────────────────────────────────────────────────────── */
 function esc(v) {
   const d = document.createElement('div');
@@ -203,6 +213,21 @@ function fmtShort(iso) {
   if (!iso) return '–';
   try { return new Date(iso).toLocaleDateString(); } catch { return iso; }
 }
+async function fetchJson(url, fallbackValue, errorLabel) {
+  try {
+    const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      throw new Error(errorLabel + ' returned a non-JSON response');
+    }
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || errorLabel + ' failed');
+    return data;
+  } catch (err) {
+    console.warn(errorLabel + ' fallback:', err);
+    return fallbackValue;
+  }
+}
 
 let _toastTimer;
 function showToast(msg, ok) {
@@ -216,8 +241,8 @@ function showToast(msg, ok) {
 }
 
 /* ── state ───────────────────────────────────────────────────────────────── */
-var _allActivity = [];
-var _allUsers    = [];
+var _allActivity = Array.isArray(ADMIN_BOOTSTRAP.activity) ? ADMIN_BOOTSTRAP.activity : [];
+var _allUsers    = Array.isArray(ADMIN_BOOTSTRAP.users) ? ADMIN_BOOTSTRAP.users : [];
 
 /* ── tabs ────────────────────────────────────────────────────────────────── */
 function switchTab(name) {
@@ -233,9 +258,7 @@ function switchTab(name) {
 
 /* ── metrics ─────────────────────────────────────────────────────────────── */
 async function loadMetrics() {
-  const res  = await fetch('/admin/metrics');
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'metrics fetch failed');
+  const data = await fetchJson('/admin/metrics', ADMIN_BOOTSTRAP.metrics || {}, 'Metrics');
   const t = data.totals || {};
   document.getElementById('mUsers').textContent    = t.users    != null ? t.users    : 0;
   document.getElementById('mEmails').textContent   = t.emails_sent  != null ? t.emails_sent  : 0;
@@ -276,10 +299,8 @@ function renderOverview(rows) {
 
 /* ── users tab ───────────────────────────────────────────────────────────── */
 async function loadUsers() {
-  const res  = await fetch('/admin/users');
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'users fetch failed');
-  _allUsers = data;
+  const data = await fetchJson('/admin/users', ADMIN_BOOTSTRAP.users || [], 'Users');
+  _allUsers = Array.isArray(data) ? data : [];
   renderUsers(_allUsers);
 }
 
@@ -328,10 +349,8 @@ async function toggleRole(email, currentRole) {
 
 /* ── activity tab ────────────────────────────────────────────────────────── */
 async function loadActivity() {
-  const res  = await fetch('/admin/activity?limit=200');
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'activity fetch failed');
-  _allActivity = data;
+  const data = await fetchJson('/admin/activity?limit=200', ADMIN_BOOTSTRAP.activity || [], 'Activity');
+  _allActivity = Array.isArray(data) ? data : [];
   applyActivityFilter();
 }
 
@@ -403,6 +422,9 @@ async function refreshAll() {
 }
 
 /* ── boot ────────────────────────────────────────────────────────────────── */
+loadMetrics();
+renderUsers(_allUsers);
+applyActivityFilter();
 refreshAll();
 setInterval(refreshAll, 30000);
 </script>

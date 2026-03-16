@@ -103,8 +103,9 @@ class Config:
     }
     DEFAULT_USER_ROLE = os.getenv("DEFAULT_USER_ROLE", "user")
 
-    # Voice PIN used for high-risk actions (send email / send message)
-    VOICE_ACTION_PIN = os.getenv("VOICE_ACTION_PIN", "2468")
+    # Voice PIN used for high-risk actions (send email / send message).
+    # Enforced as a single global PIN for all users.
+    VOICE_ACTION_PIN = "12345"
     PIN_MAX_ATTEMPTS = int(os.getenv("PIN_MAX_ATTEMPTS", "3"))
 
     # Challenge / token expiry windows (seconds)

@@ -46,6 +46,7 @@ def _remember_google_user(user: "GoogleUser") -> tuple[str, str]:
         "name": user.name,
         "auth_type": "google",
         "role": user.role,
+        "credentials": user.credentials_dict or {},
     }
     _save_device_tokens(tokens)
     return device_token, user.email
@@ -59,11 +60,17 @@ def _restore_google_user_from_device() -> "GoogleUser | None":
     user_data = tokens.get(device_token)
     if not user_data or user_data.get("auth_type") != "google":
         return None
+    credentials = user_data.get("credentials") or {}
+    # Old remembered sessions stored only identity. Force a real OAuth login
+    # until usable credentials are available so Gmail send/refresh won't fail.
+    required = {"token", "refresh_token", "token_uri", "client_id", "client_secret"}
+    if not required.issubset(set(credentials.keys())):
+        return None
     try:
         return GoogleUser(
             email=user_data["email"],
             name=user_data.get("name", user_data["email"]),
-            credentials_dict={},
+            credentials_dict=credentials,
             role=user_data.get("role"),
         )
     except Exception:
@@ -103,11 +110,16 @@ class GoogleUser(UserMixin):
 
     def get_credentials(self) -> Credentials:
         """Return a refreshed Credentials object."""
+        required = {"token", "refresh_token", "token_uri", "client_id", "client_secret"}
+        if not required.issubset(set((self.credentials_dict or {}).keys())):
+            raise RuntimeError("Google login needs reconnect for Gmail send access")
         creds = Credentials(**self.credentials_dict)
         if creds.expired and creds.refresh_token:
             creds.refresh(Request())
             # Persist refreshed token back to session
             session["user"]["credentials"] = _creds_to_dict(creds)
+            self.credentials_dict = session["user"]["credentials"]
+            _remember_google_user(self)
         return creds
 
 

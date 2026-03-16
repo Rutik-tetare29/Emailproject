@@ -20,7 +20,8 @@ from services.stt_whisper import transcribe, _model as _whisper_model
 from services.tts_engine import speak_to_file
 from services.email_service import fetch_emails, send_email
 from services.messaging_service import send_message as tg_send, read_latest_message as tg_read, get_all_messages as tg_all
-from services.security_admin import verify_pin
+from services.security_admin import log_activity, resolve_role, verify_pin, normalize_pin_input
+from services.profile_service import add_saved_contact, add_saved_email
 from config import Config
 
 logger = logging.getLogger(__name__)
@@ -601,7 +602,7 @@ def _detect_intent(text: str, session: dict) -> str:
                 return "send_message"
             if _any_token_matches(lower, _CANCEL_EXACT):
                 return "cancel_message"
-            return "cancel_message"  # unknown at confirm = treat as cancel
+            return "send_message"  # let handler reprompt instead of hard-cancel
 
         else:
             # Unknown step fallback
@@ -647,7 +648,7 @@ def _detect_intent(text: str, session: dict) -> str:
                 return "send_email"
             if _any_token_matches(lower, _CANCEL_EXACT):
                 return "cancel_email"
-            return "cancel_email"  # unknown at confirm = treat as cancel
+            return "send_email"  # let handler reprompt instead of hard-cancel
 
         else:
             if _is_cancel_content(lower):
@@ -1069,6 +1070,58 @@ def _handle_stop_reading(session: dict = None) -> str:
     return ""
 
 
+def _session_user_email(session: dict) -> str:
+    user = session.get("user", {}) if isinstance(session, dict) else {}
+    return str(user.get("email", "")).strip().lower()
+
+
+def _session_user_role(session: dict) -> str:
+    user = session.get("user", {}) if isinstance(session, dict) else {}
+    role = str(user.get("role", "")).strip().lower()
+    if role:
+        return role
+    return resolve_role(_session_user_email(session))
+
+
+def _log_compose_activity(session: dict, action: str, status: str = "success", details: dict | None = None) -> None:
+    try:
+        log_activity(
+            user_email=_session_user_email(session) or "anonymous",
+            role=_session_user_role(session),
+            action=action,
+            status=status,
+            details=details,
+            ip="",
+        )
+    except Exception as exc:
+        logger.warning("Could not log compose activity '%s': %s", action, exc)
+
+
+def _remember_saved_contact(session: dict, recipient: str) -> None:
+    """Best-effort persistence of successful Telegram recipients for profile reuse."""
+    try:
+        user_email = _session_user_email(session)
+        if user_email and recipient:
+            add_saved_contact(user_email, recipient)
+    except Exception as exc:
+        logger.warning("Could not save Telegram recipient to profile: %s", exc)
+
+
+def _remember_saved_email(session: dict, recipient_email: str) -> None:
+    """Best-effort persistence of successful email recipients for profile reuse."""
+    try:
+        user_email = _session_user_email(session)
+        if user_email and recipient_email:
+            add_saved_email(user_email, recipient_email)
+    except Exception as exc:
+        logger.warning("Could not save email recipient to profile: %s", exc)
+
+
+def _looks_like_pin_input(text: str) -> bool:
+    digits = normalize_pin_input(text or "")
+    return 4 <= len(digits) <= 8
+
+
 def _handle_cancel_email(session: dict) -> str:
     session.pop("email_compose", None)
     session.modified = True
@@ -1267,14 +1320,66 @@ def _handle_send_email(session: dict, transcription: str, eng_text: str = "") ->
             session["email_compose"] = dict(compose, step="pin")
             session.modified = True
             return "Security check: please say your PIN digits now."
-        else:
-            # Didn't confirm → treat as implicit cancel
+        if _any_token_matches(ctrl_lower, _CANCEL_EXACT) or _is_native_cancel():
             session.pop("email_compose", None)
+            session.modified = True
             return "Email cancelled."
+
+        # If user speaks PIN at confirm step, treat it as direct secure confirmation.
+        if _looks_like_pin_input(ctrl_lower):
+            pin_candidate = (eng_text or transcription).strip()
+            user_email = _session_user_email(session)
+            if verify_pin(pin_candidate, user_email=user_email):
+                to      = compose["to"]
+                subject = compose["subject"]
+                body    = compose["body"]
+                session.pop("email_compose", None)
+                session.modified = True
+                try:
+                    success, message = send_email(session, to, subject, body)
+                    if success:
+                        _remember_saved_email(session, to)
+                        _log_compose_activity(
+                            session,
+                            "email_sent",
+                            details={"to": to, "subject": subject[:80]},
+                        )
+                        readable_to = to.replace("@", " at ").replace(".", " dot ")
+                        return f"Email sent successfully to {readable_to}!"
+                    _log_compose_activity(
+                        session,
+                        "email_send_failed",
+                        status="error",
+                        details={"to": to, "subject": subject[:80], "reason": message},
+                    )
+                    logger.error("Send email returned failure: %s", message)
+                    return f"Failed to send email. {message}. Please try again."
+                except Exception as exc:
+                    _log_compose_activity(
+                        session,
+                        "email_send_failed",
+                        status="error",
+                        details={"to": to, "subject": subject[:80], "reason": str(exc)},
+                    )
+                    logger.error("Send email exception: %s", exc)
+                    return "Sorry, I could not send the email. Please check your settings and try again."
+
+            attempts = int(compose.get("pin_attempts", 0)) + 1
+            if attempts >= Config.PIN_MAX_ATTEMPTS:
+                session.pop("email_compose", None)
+                session.modified = True
+                return "PIN verification failed too many times. Email cancelled."
+
+            session["email_compose"] = dict(compose, pin_attempts=attempts, step="pin")
+            session.modified = True
+            return "That PIN is not correct. Please say your PIN again."
+
+        return "Please say yes to continue, or say cancel to stop. You can also speak your PIN digits now."
 
     elif step == "pin":
         pin_candidate = (eng_text or transcription).strip()
-        if verify_pin(pin_candidate):
+        user_email = _session_user_email(session)
+        if verify_pin(pin_candidate, user_email=user_email):
             to      = compose["to"]
             subject = compose["subject"]
             body    = compose["body"]
@@ -1283,11 +1388,29 @@ def _handle_send_email(session: dict, transcription: str, eng_text: str = "") ->
             try:
                 success, message = send_email(session, to, subject, body)
                 if success:
+                    _remember_saved_email(session, to)
+                    _log_compose_activity(
+                        session,
+                        "email_sent",
+                        details={"to": to, "subject": subject[:80]},
+                    )
                     readable_to = to.replace("@", " at ").replace(".", " dot ")
                     return f"Email sent successfully to {readable_to}!"
+                _log_compose_activity(
+                    session,
+                    "email_send_failed",
+                    status="error",
+                    details={"to": to, "subject": subject[:80], "reason": message},
+                )
                 logger.error("Send email returned failure: %s", message)
                 return f"Failed to send email. {message}. Please try again."
             except Exception as exc:
+                _log_compose_activity(
+                    session,
+                    "email_send_failed",
+                    status="error",
+                    details={"to": to, "subject": subject[:80], "reason": str(exc)},
+                )
                 logger.error("Send email exception: %s", exc)
                 return "Sorry, I could not send the email. Please check your settings and try again."
 
@@ -1402,21 +1525,64 @@ def _handle_send_message(session: dict, transcription: str, eng_text: str = "") 
             session["msg_compose"] = dict(compose, step="pin")
             session.modified = True
             return "Security check: please say your PIN digits now."
-        else:
+        if _any_token_matches(ctrl_lower, _CANCEL_EXACT) or _is_native_cancel():
             session.pop("msg_compose", None)
             session.modified = True
             return "Message cancelled. What else can I help you with?"
 
+        # If user speaks PIN at confirm step, treat it as direct secure confirmation.
+        if _looks_like_pin_input(ctrl_lower):
+            pin_candidate = (eng_text or transcription).strip()
+            user_email = _session_user_email(session)
+            if verify_pin(pin_candidate, user_email=user_email):
+                to = compose["to"]
+                text = compose["text"]
+                session.pop("msg_compose", None)
+                session.modified = True
+                result = tg_send(to, text)
+                if result.get("success"):
+                    _remember_saved_contact(session, to)
+                    _log_compose_activity(session, "message_sent", details={"receiver": to})
+                    return f"Message sent to {to} via Telegram!"
+                _log_compose_activity(
+                    session,
+                    "message_send_failed",
+                    status="error",
+                    details={"receiver": to, "reason": result.get("message", "")},
+                )
+                return f"Could not send message. {result.get('message', '')}"
+
+            attempts = int(compose.get("pin_attempts", 0)) + 1
+            if attempts >= Config.PIN_MAX_ATTEMPTS:
+                session.pop("msg_compose", None)
+                session.modified = True
+                return "PIN verification failed too many times. Message cancelled."
+
+            session["msg_compose"] = dict(compose, pin_attempts=attempts, step="pin")
+            session.modified = True
+            return "That PIN is not correct. Please say your PIN again."
+
+        return "Please say yes to continue, or say cancel to stop. You can also speak your PIN digits now."
+
     elif step == "pin":
         pin_candidate = (eng_text or transcription).strip()
-        if verify_pin(pin_candidate):
+        user_email = _session_user_email(session)
+        if verify_pin(pin_candidate, user_email=user_email):
             to = compose["to"]
             text = compose["text"]
             session.pop("msg_compose", None)
             session.modified = True
             result = tg_send(to, text)
             if result.get("success"):
+                _remember_saved_contact(session, to)
+                _log_compose_activity(session, "message_sent", details={"receiver": to})
                 return f"Message sent to {to} via Telegram!"
+            _log_compose_activity(
+                session,
+                "message_send_failed",
+                status="error",
+                details={"receiver": to, "reason": result.get("message", "")},
+            )
             return f"Could not send message. {result.get('message', '')}"
 
         attempts = int(compose.get("pin_attempts", 0)) + 1
@@ -1752,7 +1918,8 @@ def process_text_compose_input(field: str, value: str, session: dict) -> dict:
         response_text = "Security check: type or say your PIN digits now."
 
     elif field == "pin":
-        if verify_pin(value):
+        user_email = _session_user_email(session)
+        if verify_pin(value, user_email=user_email):
             to      = compose.get("to", "")
             subject = compose.get("subject", "")
             body_v  = compose.get("body", "")
@@ -1761,11 +1928,29 @@ def process_text_compose_input(field: str, value: str, session: dict) -> dict:
             try:
                 success, message = send_email(session, to, subject, body_v)
                 if success:
+                    _remember_saved_email(session, to)
+                    _log_compose_activity(
+                        session,
+                        "email_sent",
+                        details={"to": to, "subject": subject[:80]},
+                    )
                     readable_to = to.replace("@", " at ").replace(".", " dot ")
                     response_text = f"Email sent successfully to {readable_to}!"
                 else:
+                    _log_compose_activity(
+                        session,
+                        "email_send_failed",
+                        status="error",
+                        details={"to": to, "subject": subject[:80], "reason": message},
+                    )
                     response_text = f"Failed to send email. {message}. Please try again."
             except Exception as exc:
+                _log_compose_activity(
+                    session,
+                    "email_send_failed",
+                    status="error",
+                    details={"to": to, "subject": subject[:80], "reason": str(exc)},
+                )
                 logger.error("Text compose send error: %s", exc)
                 response_text = "Sorry, I could not send the email. Please check your settings."
         else:
@@ -1852,7 +2037,8 @@ def process_text_msg_input(field: str, value: str, session: dict) -> dict:
         response_text = "Security check: type or say your PIN digits now."
 
     elif field == "pin":
-        if verify_pin(value):
+        user_email = _session_user_email(session)
+        if verify_pin(value, user_email=user_email):
             to = compose.get("to", "")
             text = compose.get("text", "")
             session.pop("msg_compose", None)
@@ -1860,10 +2046,24 @@ def process_text_msg_input(field: str, value: str, session: dict) -> dict:
             try:
                 result = tg_send(to, text)
                 if result.get("success"):
+                    _remember_saved_contact(session, to)
+                    _log_compose_activity(session, "message_sent", details={"receiver": to})
                     response_text = f"Telegram message sent to {to}!"
                 else:
+                    _log_compose_activity(
+                        session,
+                        "message_send_failed",
+                        status="error",
+                        details={"receiver": to, "reason": result.get("message", "")},
+                    )
                     response_text = f"Could not send. {result.get('message', '')}. Please try again."
             except Exception as exc:
+                _log_compose_activity(
+                    session,
+                    "message_send_failed",
+                    status="error",
+                    details={"receiver": to, "reason": str(exc)},
+                )
                 logger.error("Text msg send error: %s", exc)
                 response_text = "Sorry, I could not send the message. Please try again."
         else:

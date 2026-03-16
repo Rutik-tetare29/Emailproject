@@ -41,6 +41,14 @@ from services.security_admin import (
     update_user_role,
     verify_pin,
 )
+from services.profile_service import (
+    add_saved_contact,
+    add_saved_email,
+    get_profile,
+    has_custom_pin,
+    set_profile_pin,
+    verify_profile_pin,
+)
 
 # ── App factory ──────────────────────────────────────────────────────────────
 app = Flask(__name__)
@@ -64,6 +72,12 @@ def _current_role() -> str:
     if role:
         return role
     return resolve_role(user_data.get("email", ""))
+
+
+def _current_email() -> str:
+    user_data = session.get("user", {})
+    email = user_data.get("email") or getattr(current_user, "email", "")
+    return (email or "").strip().lower()
 
 
 def _log_user_action(action: str, status: str = "success", details: dict | None = None):
@@ -710,7 +724,16 @@ def dashboard():
 @admin_required
 def admin_dashboard():
     _log_user_action("admin_dashboard_viewed")
-    return render_template("admin.html", user=current_user)
+    initial_metrics = get_metrics()
+    initial_users = get_users()
+    initial_activity = get_activity_log(limit=200)
+    return render_template(
+        "admin.html",
+        user=current_user,
+        initial_metrics=initial_metrics,
+        initial_users=initial_users,
+        initial_activity=initial_activity,
+    )
 
 
 @app.route("/admin/metrics", methods=["GET"])
@@ -947,6 +970,8 @@ def send_email_route():
 
     success, message = send_email(session, to_addr, subject, body)
     status = 200 if success else 500
+    if success:
+        add_saved_email(session.get("user", {}).get("email", ""), to_addr)
     _log_user_action(
         "email_sent" if success else "email_send_failed",
         status="success" if success else "error",
@@ -993,7 +1018,10 @@ def get_messages():
 @login_required
 def list_contacts():
     """GET /messages/contacts — Return a list of all known contacts."""
-    return jsonify({"contacts": get_contacts()})
+    user_email = session.get("user", {}).get("email", "")
+    saved_contacts = [item.get("value", "") for item in get_profile(user_email).get("saved_contacts", [])]
+    contacts = sorted({c for c in (get_contacts() + saved_contacts) if c}, key=str.lower)
+    return jsonify({"contacts": contacts})
 
 
 @app.route("/messages/send", methods=["POST"])
@@ -1028,12 +1056,53 @@ def send_message_route():
 
     result = msg_send(receiver, message)
     status = 200 if result["success"] else 400
+    if result.get("success"):
+        add_saved_contact(session.get("user", {}).get("email", ""), receiver)
     _log_user_action(
         "message_sent" if result.get("success") else "message_send_failed",
         status="success" if result.get("success") else "error",
         details={"receiver": receiver},
     )
     return jsonify(result), status
+
+
+@app.route("/profile", methods=["GET"])
+@login_required
+def get_profile_route():
+    user_email = _current_email()
+    return jsonify(get_profile(user_email))
+
+
+@app.route("/profile/pin", methods=["POST"])
+@login_required
+def update_profile_pin_route():
+    data = request.get_json(force=True) or {}
+    user_email = _current_email()
+    if not user_email:
+        return jsonify({"success": False, "error": "Missing user context"}), 401
+
+    current_pin = str(data.get("current_pin", "")).strip()
+    new_pin = str(data.get("new_pin", "")).strip()
+    confirm_pin = str(data.get("confirm_pin", "")).strip()
+
+    if not new_pin:
+        return jsonify({"success": False, "error": "New PIN is required"}), 400
+    if new_pin != confirm_pin:
+        return jsonify({"success": False, "error": "PIN confirmation does not match"}), 400
+
+    normalized = "".join(ch for ch in new_pin if ch.isdigit())
+    if len(normalized) < 4 or len(normalized) > 8:
+        return jsonify({"success": False, "error": "PIN must be 4 to 8 digits"}), 400
+
+    if has_custom_pin(user_email) and not verify_profile_pin(user_email, current_pin):
+        return jsonify({"success": False, "error": "Current PIN is incorrect"}), 401
+
+    ok, message = set_profile_pin(user_email, normalized)
+    if not ok:
+        return jsonify({"success": False, "error": message}), 400
+
+    _log_user_action("profile_pin_updated")
+    return jsonify({"success": True, "message": "PIN updated successfully"})
 
 
 @app.route("/messages/latest", methods=["GET"])
@@ -1340,7 +1409,8 @@ def confirm_answer():
             }
         )
 
-    if not verify_pin(pin):
+    user_email = _current_email()
+    if not verify_pin(pin, user_email=user_email):
         challenge["attempts"] = int(challenge.get("attempts", 0)) + 1
         challenges[challenge_id] = challenge
         session["action_challenges"] = challenges

@@ -101,6 +101,9 @@ def _fetch_gmail_api(session: dict, limit: int = MAX_EMAILS) -> list[dict]:
                 "snippet": body[:200] if body else msg_data.get("snippet", ""),
             })
         return emails
+    except RuntimeError as exc:
+        logger.warning("Gmail API fetch requires reconnect: %s", exc)
+        return []
     except Exception as exc:
         logger.error("Gmail API fetch error: %s", exc)
         return []
@@ -152,6 +155,8 @@ def _send_gmail_api(session: dict, to_addr: str, subject: str, body: str) -> tup
             userId="me", body={"raw": raw}
         ).execute()
         return True, "Email sent successfully"
+    except RuntimeError:
+        return False, "Google sign-in needs reconnect for Gmail send. Please sign in with Google once again, then retry."
     except Exception as exc:
         logger.error("Gmail API send error: %s", exc)
         return False, str(exc)

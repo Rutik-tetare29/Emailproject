@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from config import Config
+from services.profile_service import verify_profile_pin
 
 _ACTIVITY_LOG_PATH = os.path.join(Config.DATA_DIR, "activity_log.json")
 _USER_REGISTRY_PATH = os.path.join(Config.DATA_DIR, "user_registry.json")
@@ -186,7 +187,9 @@ def normalize_pin_input(raw: str) -> str:
     return "".join(parts)
 
 
-def verify_pin(raw_pin: str) -> bool:
+def verify_pin(raw_pin: str, user_email: str = "") -> bool:
+    if user_email and verify_profile_pin(user_email, raw_pin):
+        return True
     candidate = normalize_pin_input(raw_pin)
     target = normalize_pin_input(Config.VOICE_ACTION_PIN)
     return bool(candidate) and hmac.compare_digest(candidate, target)
