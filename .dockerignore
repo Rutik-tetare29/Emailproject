@@ -6,6 +6,10 @@ __pycache__/
 *.wav
 .env
 venv/
+.venv/
 .git/
 .gitignore
 static/audio/
+data/
+model/
+vosk-model-small-en-us-0.15/

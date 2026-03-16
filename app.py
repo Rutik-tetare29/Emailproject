@@ -244,6 +244,11 @@ def login_page():
     return render_template("login.html")
 
 
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "ok"}), 200
+
+
 # ── Voice login transcription (no @login_required) ────────────────────────────
 
 def _normalize_app_password(raw: str) -> str:

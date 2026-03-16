@@ -1,4 +1,3 @@
-version: '3.9'
 services:
   voice-email-app:
     build: .
@@ -7,4 +6,20 @@ services:
       - "5000:5000"
     env_file:
       - .env
+    environment:
+      DEBUG: "false"
+      OAUTHLIB_INSECURE_TRANSPORT: "0"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    volumes:
+      - ./data:/app/data
+      - ./static/audio:/app/static/audio
+      - whisper-cache:/home/appuser/.cache/whisper
     restart: unless-stopped
+
+volumes:
+  whisper-cache:

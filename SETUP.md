@@ -59,6 +59,38 @@ docker compose up --build
 
 Open `http://localhost:5000` in your browser.
 
+## 9. Production Docker and Deploy Checklist
+Use these before deploying to a server or cloud container platform:
+
+1. Set secure environment values in `.env`:
+```bash
+DEBUG=false
+OAUTHLIB_INSECURE_TRANSPORT=0
+SECRET_KEY=<long-random-secret>
+GOOGLE_REDIRECT_URI=https://<your-domain>/login/google/callback
+ADMIN_EMAILS=<admin1@example.com,admin2@example.com>
+```
+
+2. Build and run in detached mode:
+```bash
+docker compose up -d --build
+```
+
+3. Verify health endpoint:
+```bash
+curl http://localhost:5000/health
+```
+
+4. Data persistence:
+- User registry and admin activity logs persist in `./data`.
+- Generated audio persists in `./static/audio`.
+- Whisper model cache persists in Docker volume `whisper-cache`.
+
+5. Reverse proxy/TLS:
+- Put Nginx, Caddy, or cloud ingress in front of the app.
+- Terminate HTTPS at the proxy.
+- Forward traffic to container port `5000`.
+
 ## Quick command reference
 | Voice command | Action |
 |---|---|
