@@ -6,17 +6,37 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"), override=True)
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    val = os.getenv(name)
+    if val is None:
+        return default
+    return val.strip().lower() in {"1", "true", "yes", "on"}
+
+
 class Config:
     # Flask
     SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-production")
-    DEBUG = os.getenv("DEBUG", "false").lower() == "true"
+    DEBUG = _env_bool("DEBUG", False)
+    HOST = os.getenv("HOST", "0.0.0.0")
+    PORT = int(os.getenv("PORT", "5000"))
+
+    # Cookies / sessions
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = os.getenv("SESSION_COOKIE_SAMESITE", "Lax")
+    SESSION_COOKIE_SECURE = _env_bool("SESSION_COOKIE_SECURE", not DEBUG)
+    REMEMBER_COOKIE_HTTPONLY = True
+    REMEMBER_COOKIE_SECURE = _env_bool("REMEMBER_COOKIE_SECURE", SESSION_COOKIE_SECURE)
+    PREFERRED_URL_SCHEME = os.getenv("PREFERRED_URL_SCHEME", "https" if SESSION_COOKIE_SECURE else "http")
+
+    # Reverse proxy support (required for Render / load balancers)
+    TRUST_PROXY_HEADERS = _env_bool("TRUST_PROXY_HEADERS", True)
 
     # Audio temp storage
-    UPLOAD_FOLDER = os.path.join(BASE_DIR, "static", "audio")
+    UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", os.path.join(BASE_DIR, "static", "audio"))
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
     # Data storage
-    DATA_DIR = os.path.join(BASE_DIR, "data")
+    DATA_DIR = os.getenv("DATA_DIR", os.path.join(BASE_DIR, "data"))
     os.makedirs(DATA_DIR, exist_ok=True)
 
     # Google OAuth
@@ -30,7 +50,7 @@ class Config:
         "https://www.googleapis.com/auth/userinfo.email",
         "openid",
     ]
-    OAUTHLIB_INSECURE_TRANSPORT = os.getenv("OAUTHLIB_INSECURE_TRANSPORT", "1")
+    OAUTHLIB_INSECURE_TRANSPORT = os.getenv("OAUTHLIB_INSECURE_TRANSPORT", "0")
 
     # Whisper STT model
     # Options: tiny (~75MB), base (~145MB), small (~465MB, recommended), medium (~1.5GB)
@@ -105,7 +125,7 @@ class Config:
 
     # Voice PIN used for high-risk actions (send email / send message).
     # Enforced as a single global PIN for all users.
-    VOICE_ACTION_PIN = "12345"
+    VOICE_ACTION_PIN = os.getenv("VOICE_ACTION_PIN", "12345")
     PIN_MAX_ATTEMPTS = int(os.getenv("PIN_MAX_ATTEMPTS", "3"))
 
     # Challenge / token expiry windows (seconds)

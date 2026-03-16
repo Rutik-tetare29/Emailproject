@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: voice-email-app
+    env: docker
+    rootDir: .
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: DEBUG
+        value: "false"
+      - key: OAUTHLIB_INSECURE_TRANSPORT
+        value: "0"
+      - key: SESSION_COOKIE_SECURE
+        value: "true"
+      - key: REMEMBER_COOKIE_SECURE
+        value: "true"
+      - key: PREFERRED_URL_SCHEME
+        value: https
+      - key: TRUST_PROXY_HEADERS
+        value: "true"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATA_DIR
+        value: /var/data/data
+      - key: UPLOAD_FOLDER
+        value: /var/data/audio
+    disks:
+      - name: voice-email-data
+        mountPath: /var/data
+        sizeGB: 1

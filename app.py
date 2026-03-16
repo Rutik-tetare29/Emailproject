@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from functools import wraps
 from flask import Flask, request, jsonify, session, send_from_directory, render_template, redirect, url_for
 from flask_login import LoginManager, login_required, current_user, logout_user
+from werkzeug.middleware.proxy_fix import ProxyFix
 from config import Config
 from auth.google_auth import google_auth_bp, GoogleUser
 from auth.app_password_auth import apppass_auth_bp, AppPasswordUser
@@ -53,10 +54,11 @@ from services.profile_service import (
 # ── App factory ──────────────────────────────────────────────────────────────
 app = Flask(__name__)
 app.config.from_object(Config)
+if app.config.get("TRUST_PROXY_HEADERS"):
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 # Keep sessions alive across server restarts (cookie survives as long as
 # SECRET_KEY doesn't change — it's pinned in .env)
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=7)
-app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
 # Allow OAuth over plain HTTP during local development
 os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = app.config["OAUTHLIB_INSECURE_TRANSPORT"]
@@ -1573,4 +1575,4 @@ def login_success_audio():
     return jsonify({"audio_url": f"/static/audio/{os.path.basename(out_path)}"})
 
 if __name__ == "__main__":
-    app.run(debug=app.config["DEBUG"], port=5000)
+    app.run(host=app.config["HOST"], port=app.config["PORT"], debug=app.config["DEBUG"])

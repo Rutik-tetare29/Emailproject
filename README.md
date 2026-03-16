@@ -124,6 +124,41 @@ Before internet-facing deployment:
 - Keep `OAUTHLIB_INSECURE_TRANSPORT=0`
 - Rotate/secure all API tokens and credentials
 
+## Deploy on Render
+This repo includes a `render.yaml` blueprint for one-click setup.
+It uses Docker runtime so native audio dependencies (for example PortAudio) build reliably.
+
+### Option A: Blueprint deploy (recommended)
+1. Push this repository to GitHub.
+2. In Render: New + -> Blueprint.
+3. Select your repository and confirm creation.
+4. Render creates the web service and a persistent disk.
+5. Set required secrets in Render environment:
+  - `GOOGLE_CLIENT_SECRETS_FILE` (path in container, default `./client_secrets.json`)
+  - `GOOGLE_REDIRECT_URI` (your Render URL callback)
+  - `ADMIN_EMAILS`
+  - `VOICE_ACTION_PIN`
+  - Telegram variables if used (`MESSAGING_BACKEND`, `TELEGRAM_API_ID`, etc.)
+
+### Option B: Manual web service
+Create a **Web Service** with **Environment = Docker** and select this repository.
+Render will build using `Dockerfile` and run Gunicorn with the platform `PORT`.
+
+Recommended environment values:
+- `DEBUG=false`
+- `OAUTHLIB_INSECURE_TRANSPORT=0`
+- `SESSION_COOKIE_SECURE=true`
+- `REMEMBER_COOKIE_SECURE=true`
+- `PREFERRED_URL_SCHEME=https`
+- `TRUST_PROXY_HEADERS=true`
+
+### Persistent data on Render
+Attach a disk and point app data to it:
+- `DATA_DIR=/var/data/data`
+- `UPLOAD_FOLDER=/var/data/audio`
+
+Then redeploy once after setting env vars.
+
 ## API Overview
 ### Voice
 - `POST /voice/login-transcribe`

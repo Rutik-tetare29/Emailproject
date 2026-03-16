@@ -35,7 +35,7 @@ from config import Config
 logger = logging.getLogger(__name__)
 
 # ---- paths ------------------------------------------------------------------
-_DATA_DIR      = os.path.join(os.path.dirname(__file__), "..", "data")
+_DATA_DIR      = Config.DATA_DIR
 _SIM_FILE      = os.path.join(_DATA_DIR, "messages.json")
 _SESSION_FILE  = os.path.join(_DATA_DIR, "telegram")   # .session appended by Telethon
 _CONTACTS_FILE = os.path.join(_DATA_DIR, "telegram_contacts.json")
