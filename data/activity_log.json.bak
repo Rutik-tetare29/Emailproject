@@ -234,5 +234,23 @@
     "status": "success",
     "ip": "127.0.0.1",
     "details": {}
+  },
+  {
+    "timestamp": "2026-03-16T11:35:40.436080+00:00",
+    "user_email": "rutiktetare206@gmail.com",
+    "role": "admin",
+    "action": "admin_activity_viewed",
+    "status": "success",
+    "ip": "127.0.0.1",
+    "details": {}
+  },
+  {
+    "timestamp": "2026-03-16T11:36:10.434650+00:00",
+    "user_email": "rutiktetare206@gmail.com",
+    "role": "admin",
+    "action": "admin_activity_viewed",
+    "status": "success",
+    "ip": "127.0.0.1",
+    "details": {}
   }
 ]
