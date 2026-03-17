@@ -1444,19 +1444,23 @@ def confirm_answer():
         _log_user_action("confirm_answer_failed", status="error", details={"reason": "challenge_not_found"})
         return jsonify({"error": "Invalid or expired challenge"}), 400
 
-    confirmed = check_confirmation_answer(transcription)
-    if not confirmed:
-        _log_user_action("confirm_rejected", details={"challenge_id": challenge_id})
-        return jsonify(
-            {
-                "confirmed": False,
-                "transcription": transcription,
-                "result": "cancelled",
-            }
-        )
-
     user_email = _current_email()
-    if not verify_pin(pin, user_email=user_email):
+    pin_ok = bool(pin) and verify_pin(pin, user_email=user_email)
+
+    # Accept a valid PIN even if yes/no transcription is unclear.
+    # This reduces false rejections caused by STT variability.
+    if not pin_ok:
+        confirmed = check_confirmation_answer(transcription)
+        if not confirmed:
+            _log_user_action("confirm_rejected", details={"challenge_id": challenge_id})
+            return jsonify(
+                {
+                    "confirmed": False,
+                    "transcription": transcription,
+                    "result": "cancelled",
+                }
+            )
+
         challenge["attempts"] = int(challenge.get("attempts", 0)) + 1
         challenges[challenge_id] = challenge
         session["action_challenges"] = challenges
