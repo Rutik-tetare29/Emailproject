@@ -75,11 +75,8 @@ class Config:
     ]
     OAUTHLIB_INSECURE_TRANSPORT = os.getenv("OAUTHLIB_INSECURE_TRANSPORT", "0")
 
-    # Whisper STT model
-    # Options: tiny (~75MB), base (~145MB), small (~465MB, recommended), medium (~1.5GB)
-    # 'small' gives ~30% better accuracy over 'base' with ~8-15 s on CPU.
-    # Model is auto-downloaded to ~/.cache/whisper/ on first run.
-    WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small")
+    # STT backend language hint (used by lightweight cloud recognition backend)
+    STT_DEFAULT_LANG = os.getenv("STT_DEFAULT_LANG", "en")
 
     # Pinned OAuth redirect URI - must match exactly what is registered in
     # Google Cloud Console -> APIs & Services -> Credentials -> Authorised redirect URIs

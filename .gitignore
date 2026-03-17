@@ -6,3 +6,12 @@ data/google_device_tokens.json
 .venv/
 __pycache__/
 *.pyc
+
+# Local environment and generated audio
+.env
+static/audio/*.wav
+static/audio/*.mp3
+
+# Large/offline model assets (excluded for lightweight deployment)
+vosk-model-small-en-us-0.15/
+model/vosk-model-small-en-us-0.15/

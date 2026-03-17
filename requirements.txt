@@ -6,12 +6,9 @@ gunicorn==22.0.0
 requests>=2.31.0
 telethon>=1.42.0
 
-# Speech — STT
-# faster-whisper uses the same model weights as openai-whisper but runs
-# via CTranslate2 with int8 quantization → ~4x faster on CPU, same accuracy.
-faster-whisper>=1.0.0
-openai-whisper          # kept as fallback; not imported at runtime
-soundfile
+# Speech — STT (lightweight)
+# Uses Google Web Speech via speech_recognition; no local Whisper/Torch models.
+SpeechRecognition>=3.10.4
 
 # Speech — TTS
 pyttsx3==2.90
@@ -23,7 +20,7 @@ google-auth-httplib2==0.2.0
 google-api-python-client==2.131.0
 
 # Audio processing
-pyaudio==0.2.14
+# Browser captures audio; PyAudio is not required for server-side transcription.
 
 # ── Milestone 4: Multi-language support ─────────────────────────────────────
 gTTS>=2.5.1          # Google TTS — Hindi / Marathi offline-free audio

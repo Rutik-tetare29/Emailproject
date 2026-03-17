@@ -18,8 +18,4 @@ services:
     volumes:
       - ./data:/app/data
       - ./static/audio:/app/static/audio
-      - whisper-cache:/home/appuser/.cache/whisper
     restart: unless-stopped
-
-volumes:
-  whisper-cache:

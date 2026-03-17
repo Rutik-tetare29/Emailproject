@@ -1768,16 +1768,16 @@ def process_voice_command(audio_file: FileStorage, session: dict, choosing_servi
     temp_path = os.path.join(Config.UPLOAD_FOLDER, f"input_{uuid.uuid4().hex}.wav")
     audio_file.save(temp_path)
 
-    # Early exit if Whisper model is not loaded
+    # Early exit if STT backend is not available
     if _whisper_model is None:
-        tts_path = speak_to_file("Whisper model failed to load. Please run: pip install openai-whisper")
+        tts_path = speak_to_file("Speech recognition backend is not available. Please check server dependencies.")
         audio_url = f"/static/audio/{os.path.basename(tts_path)}" if tts_path else None
         try: os.remove(temp_path)
         except OSError: pass
         return {
             "transcription": "",
             "intent": "error",
-            "response_text": "Whisper model not loaded. Run: pip install openai-whisper",
+            "response_text": "Speech recognition backend is not available. Check deployment dependencies.",
             "audio_url": audio_url,
         }
 

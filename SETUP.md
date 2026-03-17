@@ -8,14 +8,14 @@ venv\Scripts\activate          # Windows
 pip install -r requirements.txt
 ```
 
-## 2. Whisper model
-No manual download needed. The Whisper model is **automatically downloaded** to `~/.cache/whisper/` on first run.
-Default model: `base` (~145 MB). You can change it in `.env` (`WHISPER_MODEL=tiny/base/small/medium`).
+## 2. Speech-to-Text backend
+The app uses a lightweight cloud STT backend via `SpeechRecognition`.
+No local Whisper/Torch model download is required.
 
 ## 3. Configure environment
 ```bash
 copy .env.example .env
-# Edit .env — set SECRET_KEY (and optionally WHISPER_MODEL)
+# Edit .env — set SECRET_KEY (and optionally STT_DEFAULT_LANG)
 ```
 
 ## 4. Google OAuth setup (optional — for Gmail API login)
@@ -87,7 +87,6 @@ curl http://localhost:5000/health
 4. Data persistence:
 - User registry and admin activity logs persist in `./data`.
 - Generated audio persists in `./static/audio`.
-- Whisper model cache persists in Docker volume `whisper-cache`.
 
 5. Reverse proxy/TLS:
 - Put Nginx, Caddy, or cloud ingress in front of the app.
