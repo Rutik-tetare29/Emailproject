@@ -43,5 +43,173 @@
     "status": "success",
     "ip": "127.0.0.1",
     "details": {}
+  },
+  {
+    "timestamp": "2026-03-17T08:35:59.317129+00:00",
+    "user_email": "rutiktetare206@gmail.com",
+    "role": "admin",
+    "action": "admin_activity_viewed",
+    "status": "success",
+    "ip": "127.0.0.1",
+    "details": {}
+  },
+  {
+    "timestamp": "2026-03-17T08:36:59.228589+00:00",
+    "user_email": "rutiktetare206@gmail.com",
+    "role": "admin",
+    "action": "admin_metrics_viewed",
+    "status": "success",
+    "ip": "127.0.0.1",
+    "details": {}
+  },
+  {
+    "timestamp": "2026-03-17T08:36:59.274475+00:00",
+    "user_email": "rutiktetare206@gmail.com",
+    "role": "admin",
+    "action": "admin_activity_viewed",
+    "status": "success",
+    "ip": "127.0.0.1",
+    "details": {}
+  },
+  {
+    "timestamp": "2026-03-17T08:37:59.197969+00:00",
+    "user_email": "rutiktetare206@gmail.com",
+    "role": "admin",
+    "action": "admin_metrics_viewed",
+    "status": "success",
+    "ip": "127.0.0.1",
+    "details": {}
+  },
+  {
+    "timestamp": "2026-03-17T08:37:59.241108+00:00",
+    "user_email": "rutiktetare206@gmail.com",
+    "role": "admin",
+    "action": "admin_activity_viewed",
+    "status": "success",
+    "ip": "127.0.0.1",
+    "details": {}
+  },
+  {
+    "timestamp": "2026-03-17T08:38:59.208612+00:00",
+    "user_email": "rutiktetare206@gmail.com",
+    "role": "admin",
+    "action": "admin_metrics_viewed",
+    "status": "success",
+    "ip": "127.0.0.1",
+    "details": {}
+  },
+  {
+    "timestamp": "2026-03-17T08:38:59.234616+00:00",
+    "user_email": "rutiktetare206@gmail.com",
+    "role": "admin",
+    "action": "admin_activity_viewed",
+    "status": "success",
+    "ip": "127.0.0.1",
+    "details": {}
+  },
+  {
+    "timestamp": "2026-03-17T08:39:59.210565+00:00",
+    "user_email": "rutiktetare206@gmail.com",
+    "role": "admin",
+    "action": "admin_users_viewed",
+    "status": "success",
+    "ip": "127.0.0.1",
+    "details": {}
+  },
+  {
+    "timestamp": "2026-03-17T08:39:59.240991+00:00",
+    "user_email": "rutiktetare206@gmail.com",
+    "role": "admin",
+    "action": "admin_activity_viewed",
+    "status": "success",
+    "ip": "127.0.0.1",
+    "details": {}
+  },
+  {
+    "timestamp": "2026-03-17T08:40:19.828849+00:00",
+    "user_email": "rutiktetare206@gmail.com",
+    "role": "admin",
+    "action": "admin_metrics_viewed",
+    "status": "success",
+    "ip": "127.0.0.1",
+    "details": {}
+  },
+  {
+    "timestamp": "2026-03-17T08:40:19.964550+00:00",
+    "user_email": "rutiktetare206@gmail.com",
+    "role": "admin",
+    "action": "admin_activity_viewed",
+    "status": "success",
+    "ip": "127.0.0.1",
+    "details": {}
+  },
+  {
+    "timestamp": "2026-03-17T08:40:21.856863+00:00",
+    "user_email": "rutiktetare206@gmail.com",
+    "role": "admin",
+    "action": "admin_dashboard_viewed",
+    "status": "success",
+    "ip": "127.0.0.1",
+    "details": {}
+  },
+  {
+    "timestamp": "2026-03-17T08:40:23.037994+00:00",
+    "user_email": "rutiktetare206@gmail.com",
+    "role": "admin",
+    "action": "admin_metrics_viewed",
+    "status": "success",
+    "ip": "127.0.0.1",
+    "details": {}
+  },
+  {
+    "timestamp": "2026-03-17T08:40:23.077140+00:00",
+    "user_email": "rutiktetare206@gmail.com",
+    "role": "admin",
+    "action": "admin_activity_viewed",
+    "status": "success",
+    "ip": "127.0.0.1",
+    "details": {}
+  },
+  {
+    "timestamp": "2026-03-17T08:40:23.130978+00:00",
+    "user_email": "rutiktetare206@gmail.com",
+    "role": "admin",
+    "action": "admin_metrics_viewed",
+    "status": "success",
+    "ip": "127.0.0.1",
+    "details": {}
+  },
+  {
+    "timestamp": "2026-03-17T08:40:29.052366+00:00",
+    "user_email": "rutiktetare206@gmail.com",
+    "role": "admin",
+    "action": "dashboard_viewed",
+    "status": "success",
+    "ip": "127.0.0.1",
+    "details": {
+      "role": "admin"
+    }
+  },
+  {
+    "timestamp": "2026-03-17T08:40:31.957784+00:00",
+    "user_email": "rutiktetare206@gmail.com",
+    "role": "admin",
+    "action": "dashboard_viewed",
+    "status": "success",
+    "ip": "127.0.0.1",
+    "details": {
+      "role": "admin"
+    }
+  },
+  {
+    "timestamp": "2026-03-17T08:40:38.474169+00:00",
+    "user_email": "rutiktetare206@gmail.com",
+    "role": "admin",
+    "action": "emails_fetched",
+    "status": "success",
+    "ip": "127.0.0.1",
+    "details": {
+      "count": 0
+    }
   }
 ]

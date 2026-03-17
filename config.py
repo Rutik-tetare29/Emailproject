@@ -79,7 +79,7 @@ class Config:
     # Options: tiny (~75MB), base (~145MB), small (~465MB, recommended), medium (~1.5GB)
     # 'small' gives ~30% better accuracy over 'base' with ~8-15 s on CPU.
     # Model is auto-downloaded to ~/.cache/whisper/ on first run.
-    WHISPER_MODEL = os.getenv("WHISPER_MODEL", "tiny")
+    WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small")
 
     # Pinned OAuth redirect URI - must match exactly what is registered in
     # Google Cloud Console -> APIs & Services -> Credentials -> Authorised redirect URIs
