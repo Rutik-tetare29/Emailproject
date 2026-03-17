@@ -774,6 +774,7 @@
     "status": "success",
     "ip": "127.0.0.1",
     "details": {}
+<<<<<<< HEAD
   },
   {
     "timestamp": "2026-03-16T13:17:41.461008+00:00",
@@ -1894,5 +1895,7 @@
     "status": "success",
     "ip": "127.0.0.1",
     "details": {}
+=======
+>>>>>>> parent of 5fc6c42 (added the readme file)
   }
 ]
