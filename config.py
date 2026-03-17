@@ -13,6 +13,23 @@ def _env_bool(name: str, default: bool) -> bool:
     return val.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _resolve_writable_dir(env_name: str, default_path: str, fallback_path: str) -> str:
+    """
+    Resolve a writable directory for runtime data.
+
+    Render deployments may provide paths via env vars (for example /var/data/*).
+    If that path is not writable (disk missing/misconfigured), fall back to a
+    known writable path so workers can still boot.
+    """
+    preferred = os.getenv(env_name, default_path)
+    try:
+        os.makedirs(preferred, exist_ok=True)
+        return preferred
+    except OSError:
+        os.makedirs(fallback_path, exist_ok=True)
+        return fallback_path
+
+
 class Config:
     # Flask
     SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-production")
@@ -32,12 +49,18 @@ class Config:
     TRUST_PROXY_HEADERS = _env_bool("TRUST_PROXY_HEADERS", True)
 
     # Audio temp storage
-    UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", os.path.join(BASE_DIR, "static", "audio"))
-    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+    UPLOAD_FOLDER = _resolve_writable_dir(
+        "UPLOAD_FOLDER",
+        os.path.join(BASE_DIR, "static", "audio"),
+        "/tmp/voice_email_audio",
+    )
 
     # Data storage
-    DATA_DIR = os.getenv("DATA_DIR", os.path.join(BASE_DIR, "data"))
-    os.makedirs(DATA_DIR, exist_ok=True)
+    DATA_DIR = _resolve_writable_dir(
+        "DATA_DIR",
+        os.path.join(BASE_DIR, "data"),
+        "/tmp/voice_email_data",
+    )
 
     # Google OAuth
     GOOGLE_CLIENT_SECRETS_FILE = os.getenv(
