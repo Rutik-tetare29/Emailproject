@@ -1,60 +1,166 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>VoiceMail — Voice-Based Email Assistant</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>tailwind.config = { darkMode: 'class' }</script>
+  <title>VoiceMail - Voice-Based Email Assistant</title>
   <style>
-    body { background: linear-gradient(135deg, #0f0c29, #302b63, #24243e); }
-    .glass {
-      background: rgba(255,255,255,0.07);
-      backdrop-filter: blur(16px);
-      border: 1px solid rgba(255,255,255,0.15);
+    :root {
+      --bg-1: #0f0c29;
+      --bg-2: #302b63;
+      --bg-3: #24243e;
+      --text-main: #ffffff;
+      --text-muted: #d1d5db;
+      --glass-bg: rgba(255, 255, 255, 0.07);
+      --glass-border: rgba(255, 255, 255, 0.16);
+      --card-shadow: 0 12px 26px rgba(0, 0, 0, 0.25);
     }
-    @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-12px)} }
-    .float { animation: float 4s ease-in-out infinite; }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      color: var(--text-main);
+      background: linear-gradient(135deg, var(--bg-1), var(--bg-2), var(--bg-3));
+      font-family: "Segoe UI", "Trebuchet MS", "Helvetica Neue", sans-serif;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 980px;
+      text-align: center;
+    }
+
+    .float {
+      font-size: 4rem;
+      margin-bottom: 14px;
+      animation: float 4s ease-in-out infinite;
+      text-shadow: 0 10px 26px rgba(0, 0, 0, 0.35);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(2.4rem, 6vw, 4.2rem);
+      line-height: 1.08;
+      letter-spacing: 0.4px;
+      background: linear-gradient(90deg, #b794ff, #f5b3ff, #87b8ff);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+
+    .subtitle {
+      margin: 16px auto 0;
+      max-width: 760px;
+      color: var(--text-muted);
+      font-size: clamp(1rem, 2.2vw, 1.35rem);
+      line-height: 1.45;
+    }
+
+    .cta-wrap { margin-top: 30px; }
+
+    .btn {
+      display: inline-block;
+      text-decoration: none;
+      color: #f5f3ff;
+      background: var(--glass-bg);
+      border: 1px solid var(--glass-border);
+      border-radius: 14px;
+      padding: 14px 26px;
+      font-size: 1.08rem;
+      font-weight: 700;
+      transition: transform 0.2s ease, background 0.2s ease;
+      box-shadow: var(--card-shadow);
+    }
+
+    .btn:hover {
+      transform: translateY(-2px);
+      background: rgba(255, 255, 255, 0.14);
+    }
+
+    .features {
+      margin-top: 44px;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .feature-card {
+      background: var(--glass-bg);
+      border: 1px solid var(--glass-border);
+      border-radius: 16px;
+      padding: 22px 18px;
+      box-shadow: var(--card-shadow);
+      text-align: left;
+    }
+
+    .feature-icon {
+      font-size: 1.8rem;
+      margin-bottom: 10px;
+    }
+
+    .feature-card h3 {
+      margin: 0;
+      font-size: 1.42rem;
+      font-weight: 800;
+      color: #ffffff;
+    }
+
+    .feature-card p {
+      margin: 10px 0 0;
+      color: #d5d9e6;
+      font-size: 0.98rem;
+      line-height: 1.35;
+    }
+
+    @keyframes float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-10px); }
+    }
+
+    @media (max-width: 900px) {
+      .features { grid-template-columns: 1fr; }
+      .feature-card { text-align: center; }
+    }
   </style>
 </head>
-<body class="min-h-screen flex items-center justify-center text-white">
-  <div class="text-center max-w-2xl px-6">
-    <!-- Icon -->
-    <div class="float text-7xl mb-8">🎙️</div>
+<body>
+  <main class="container">
+    <div class="float">🎙️</div>
 
-    <h1 class="text-5xl font-extrabold mb-4 bg-gradient-to-r from-purple-400 via-pink-400 to-blue-400 bg-clip-text text-transparent">
-      VoiceMail
-    </h1>
-    <p class="text-gray-300 text-xl mb-10">
-      Your intelligent voice-powered email assistant. Speak to read, compose and send emails — all hands-free.
+    <h1>VoiceMail</h1>
+    <p class="subtitle">
+      Your intelligent voice-powered email assistant. Speak to read, compose and send emails, all hands-free.
     </p>
 
-    <!-- CTA buttons -->
-    <div class="flex flex-col sm:flex-row gap-4 justify-center">
-      <a href="/login"
-         class="glass px-8 py-4 rounded-2xl text-lg font-semibold hover:bg-white/20 transition-all duration-300 hover:scale-105">
-        🚀 Get Started
-      </a>
+    <div class="cta-wrap">
+      <a href="/login" class="btn">🚀 Get Started</a>
     </div>
 
-    <!-- Features -->
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-16">
-      <div class="glass rounded-2xl p-5">
-        <div class="text-3xl mb-2">🎤</div>
-        <h3 class="font-bold mb-1">Voice Commands</h3>
-        <p class="text-sm text-gray-400">Fully offline STT powered by Whisper</p>
-      </div>
-      <div class="glass rounded-2xl p-5">
-        <div class="text-3xl mb-2">🔊</div>
-        <h3 class="font-bold mb-1">Text-to-Speech</h3>
-        <p class="text-sm text-gray-400">Natural responses via pyttsx3</p>
-      </div>
-      <div class="glass rounded-2xl p-5">
-        <div class="text-3xl mb-2">📧</div>
-        <h3 class="font-bold mb-1">Gmail Integration</h3>
-        <p class="text-sm text-gray-400">OAuth 2.0 and App Password support</p>
-      </div>
-    </div>
-  </div>
+    <section class="features">
+      <article class="feature-card">
+        <div class="feature-icon">🎤</div>
+        <h3>Voice Commands</h3>
+        <p>Fully offline STT powered by Whisper</p>
+      </article>
+
+      <article class="feature-card">
+        <div class="feature-icon">🔊</div>
+        <h3>Text-to-Speech</h3>
+        <p>Natural responses via pyttsx3</p>
+      </article>
+
+      <article class="feature-card">
+        <div class="feature-icon">📧</div>
+        <h3>Gmail Integration</h3>
+        <p>OAuth 2.0 and App Password support</p>
+      </article>
+    </section>
+  </main>
 </body>
 </html>

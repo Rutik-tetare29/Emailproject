@@ -1,0 +1,318 @@
+/*
+  Local fallback for key Tailwind utility classes used by templates.
+  Keeps UI usable when https://cdn.tailwindcss.com is unavailable.
+*/
+
+* { box-sizing: border-box; }
+
+html, body { margin: 0; padding: 0; }
+body { font-family: "Segoe UI", "Trebuchet MS", "Helvetica Neue", sans-serif; }
+
+[class~="hidden"] { display: none !important; }
+[class~="block"] { display: block; }
+[class~="inline-block"] { display: inline-block; }
+[class~="flex"] { display: flex; }
+[class~="grid"] { display: grid; }
+
+[class~="flex-1"] { flex: 1 1 0%; }
+[class~="flex-col"] { flex-direction: column; }
+[class~="flex-wrap"] { flex-wrap: wrap; }
+[class~="items-center"] { align-items: center; }
+[class~="items-start"] { align-items: flex-start; }
+[class~="justify-center"] { justify-content: center; }
+[class~="justify-between"] { justify-content: space-between; }
+[class~="justify-end"] { justify-content: flex-end; }
+
+[class~="grid-cols-1"] { grid-template-columns: repeat(1, minmax(0, 1fr)); }
+[class~="grid-cols-2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+@media (min-width: 640px) {
+  [class~="sm:block"] { display: block; }
+  [class~="sm:flex-row"] { flex-direction: row; }
+  [class~="sm:items-center"] { align-items: center; }
+}
+
+@media (min-width: 768px) {
+  [class~="md:grid-cols-2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  [class~="md:grid-cols-3"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  [class~="md:col-span-3"] { grid-column: span 3 / span 3; }
+}
+
+@media (min-width: 1024px) {
+  [class~="lg:grid-cols-3"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  [class~="lg:grid-cols-5"] { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  [class~="lg:col-span-1"] { grid-column: span 1 / span 1; }
+  [class~="lg:col-span-2"] { grid-column: span 2 / span 2; }
+}
+
+[class~="gap-1"] { gap: 0.25rem; }
+[class~="gap-1.5"] { gap: 0.375rem; }
+[class~="gap-2"] { gap: 0.5rem; }
+[class~="gap-3"] { gap: 0.75rem; }
+[class~="gap-4"] { gap: 1rem; }
+[class~="gap-6"] { gap: 1.5rem; }
+
+[class~="space-y-1"] > * + * { margin-top: 0.25rem; }
+[class~="space-y-2"] > * + * { margin-top: 0.5rem; }
+[class~="space-y-3"] > * + * { margin-top: 0.75rem; }
+[class~="space-y-4"] > * + * { margin-top: 1rem; }
+[class~="space-y-5"] > * + * { margin-top: 1.25rem; }
+[class~="space-y-6"] > * + * { margin-top: 1.5rem; }
+
+[class~="w-full"] { width: 100%; }
+[class~="w-24"] { width: 6rem; }
+[class~="w-20"] { width: 5rem; }
+[class~="w-8"] { width: 2rem; }
+[class~="w-7"] { width: 1.75rem; }
+[class~="w-5"] { width: 1.25rem; }
+[class~="w-3"] { width: 0.75rem; }
+[class~="w-3.5"] { width: 0.875rem; }
+[class~="w-56"] { width: 14rem; }
+[class~="w-[350px]"] { width: 350px; }
+
+[class~="h-full"] { height: 100%; }
+[class~="h-40"] { height: 10rem; }
+[class~="h-24"] { height: 6rem; }
+[class~="h-20"] { height: 5rem; }
+[class~="h-7"] { height: 1.75rem; }
+[class~="h-5"] { height: 1.25rem; }
+[class~="h-3"] { height: 0.75rem; }
+[class~="h-3.5"] { height: 0.875rem; }
+[class~="h-2"] { height: 0.5rem; }
+[class~="h-px"] { height: 1px; }
+
+[class~="min-h-screen"] { min-height: 100vh; }
+[class~="min-h-[48px]"] { min-height: 48px; }
+
+[class~="max-w-md"] { max-width: 28rem; }
+[class~="max-w-2xl"] { max-width: 42rem; }
+[class~="max-w-6xl"] { max-width: 72rem; }
+[class~="max-w-7xl"] { max-width: 80rem; }
+[class~="max-w-full"] { max-width: 100%; }
+[class~="max-w-[85%]"] { max-width: 85%; }
+[class~="max-w-[130px]"] { max-width: 130px; }
+[class~="max-w-[140px]"] { max-width: 140px; }
+[class~="max-w-[180px]"] { max-width: 180px; }
+[class~="max-h-[420px]"] { max-height: 420px; }
+[class~="max-h-[450px]"] { max-height: 450px; }
+[class~="max-h-[85vh]"] { max-height: 85vh; }
+
+[class~="mx-auto"] { margin-left: auto; margin-right: auto; }
+[class~="mx-4"] { margin-left: 1rem; margin-right: 1rem; }
+
+[class~="mt-0.5"] { margin-top: 0.125rem; }
+[class~="mt-1"] { margin-top: 0.25rem; }
+[class~="mt-2"] { margin-top: 0.5rem; }
+[class~="mt-3"] { margin-top: 0.75rem; }
+[class~="mt-4"] { margin-top: 1rem; }
+[class~="mt-6"] { margin-top: 1.5rem; }
+
+[class~="mb-1"] { margin-bottom: 0.25rem; }
+[class~="mb-2"] { margin-bottom: 0.5rem; }
+[class~="mb-3"] { margin-bottom: 0.75rem; }
+[class~="mb-4"] { margin-bottom: 1rem; }
+[class~="mb-5"] { margin-bottom: 1.25rem; }
+[class~="mb-6"] { margin-bottom: 1.5rem; }
+[class~="mb-8"] { margin-bottom: 2rem; }
+
+[class~="ml-1"] { margin-left: 0.25rem; }
+[class~="mr-2"] { margin-right: 0.5rem; }
+
+[class~="p-3"] { padding: 0.75rem; }
+[class~="p-4"] { padding: 1rem; }
+[class~="p-5"] { padding: 1.25rem; }
+[class~="p-6"] { padding: 1.5rem; }
+[class~="p-8"] { padding: 2rem; }
+
+[class~="px-1.5"] { padding-left: 0.375rem; padding-right: 0.375rem; }
+[class~="px-2"] { padding-left: 0.5rem; padding-right: 0.5rem; }
+[class~="px-3"] { padding-left: 0.75rem; padding-right: 0.75rem; }
+[class~="px-4"] { padding-left: 1rem; padding-right: 1rem; }
+[class~="px-5"] { padding-left: 1.25rem; padding-right: 1.25rem; }
+[class~="px-6"] { padding-left: 1.5rem; padding-right: 1.5rem; }
+
+[class~="py-0.5"] { padding-top: 0.125rem; padding-bottom: 0.125rem; }
+[class~="py-1"] { padding-top: 0.25rem; padding-bottom: 0.25rem; }
+[class~="py-1.5"] { padding-top: 0.375rem; padding-bottom: 0.375rem; }
+[class~="py-2"] { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+[class~="py-2.5"] { padding-top: 0.625rem; padding-bottom: 0.625rem; }
+[class~="py-3"] { padding-top: 0.75rem; padding-bottom: 0.75rem; }
+[class~="py-4"] { padding-top: 1rem; padding-bottom: 1rem; }
+[class~="py-8"] { padding-top: 2rem; padding-bottom: 2rem; }
+
+[class~="pt-2"] { padding-top: 0.5rem; }
+[class~="pt-4"] { padding-top: 1rem; }
+[class~="pr-3"] { padding-right: 0.75rem; }
+[class~="pr-4"] { padding-right: 1rem; }
+
+[class~="text-left"] { text-align: left; }
+[class~="text-center"] { text-align: center; }
+
+[class~="font-sans"] { font-family: "Segoe UI", "Trebuchet MS", "Helvetica Neue", sans-serif; }
+[class~="font-medium"] { font-weight: 500; }
+[class~="font-semibold"] { font-weight: 600; }
+[class~="font-bold"] { font-weight: 700; }
+[class~="font-extrabold"] { font-weight: 800; }
+
+[class~="text-xs"] { font-size: 0.75rem; line-height: 1rem; }
+[class~="text-sm"] { font-size: 0.875rem; line-height: 1.25rem; }
+[class~="text-base"] { font-size: 1rem; line-height: 1.5rem; }
+[class~="text-lg"] { font-size: 1.125rem; line-height: 1.75rem; }
+[class~="text-xl"] { font-size: 1.25rem; line-height: 1.75rem; }
+[class~="text-2xl"] { font-size: 1.5rem; line-height: 2rem; }
+[class~="text-3xl"] { font-size: 1.875rem; line-height: 2.25rem; }
+[class~="text-5xl"] { font-size: 3rem; line-height: 1; }
+[class~="text-[10px]"] { font-size: 10px; }
+[class~="text-[11px]"] { font-size: 11px; }
+
+[class~="leading-none"] { line-height: 1; }
+[class~="leading-relaxed"] { line-height: 1.625; }
+[class~="tracking-wide"] { letter-spacing: 0.025em; }
+[class~="tracking-widest"] { letter-spacing: 0.1em; }
+[class~="tracking-[0.2em]"] { letter-spacing: 0.2em; }
+[class~="uppercase"] { text-transform: uppercase; }
+[class~="truncate"] { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[class~="whitespace-nowrap"] { white-space: nowrap; }
+[class~="whitespace-pre-wrap"] { white-space: pre-wrap; }
+
+[class~="text-white"] { color: #ffffff; }
+[class~="text-white/30"] { color: rgba(255, 255, 255, 0.3); }
+[class~="text-gray-200"] { color: #e5e7eb; }
+[class~="text-gray-300"] { color: #d1d5db; }
+[class~="text-gray-400"] { color: #9ca3af; }
+[class~="text-gray-500"] { color: #6b7280; }
+[class~="text-purple-200"] { color: #ddd6fe; }
+[class~="text-purple-200/80"] { color: rgba(221, 214, 254, 0.8); }
+[class~="text-purple-200/85"] { color: rgba(221, 214, 254, 0.85); }
+[class~="text-purple-300"] { color: #c4b5fd; }
+[class~="text-green-300"] { color: #86efac; }
+[class~="text-amber-200"] { color: #fde68a; }
+[class~="text-amber-300"] { color: #fcd34d; }
+[class~="text-sky-300"] { color: #7dd3fc; }
+[class~="text-violet-300"] { color: #c4b5fd; }
+[class~="text-red-400"] { color: #f87171; }
+[class~="text-rose-200"] { color: #fecdd3; }
+[class~="text-rose-300"] { color: #fda4af; }
+[class~="text-pink-300"] { color: #f9a8d4; }
+[class~="text-blue-400"] { color: #60a5fa; }
+[class~="text-yellow-300"] { color: #fcd34d; }
+[class~="text-yellow-300/70"] { color: rgba(252, 211, 77, 0.7); }
+
+[class~="bg-black"] { background-color: #000000; }
+[class~="bg-black/30"] { background-color: rgba(0, 0, 0, 0.3); }
+[class~="bg-white/5"] { background-color: rgba(255, 255, 255, 0.05); }
+[class~="bg-white/10"] { background-color: rgba(255, 255, 255, 0.1); }
+[class~="bg-white/20"] { background-color: rgba(255, 255, 255, 0.2); }
+[class~="bg-purple-400"] { background-color: #a78bfa; }
+[class~="bg-purple-500"] { background-color: #8b5cf6; }
+[class~="bg-purple-500/30"] { background-color: rgba(139, 92, 246, 0.3); }
+[class~="bg-purple-600/40"] { background-color: rgba(147, 51, 234, 0.4); }
+[class~="bg-purple-600/50"] { background-color: rgba(147, 51, 234, 0.5); }
+[class~="bg-purple-600/60"] { background-color: rgba(147, 51, 234, 0.6); }
+[class~="bg-red-500/20"] { background-color: rgba(239, 68, 68, 0.2); }
+[class~="bg-red-500/30"] { background-color: rgba(239, 68, 68, 0.3); }
+[class~="bg-red-600/30"] { background-color: rgba(220, 38, 38, 0.3); }
+[class~="bg-red-900/30"] { background-color: rgba(127, 29, 29, 0.3); }
+[class~="bg-green-500/30"] { background-color: rgba(34, 197, 94, 0.3); }
+[class~="bg-green-700/50"] { background-color: rgba(21, 128, 61, 0.5); }
+[class~="bg-indigo-600/50"] { background-color: rgba(79, 70, 229, 0.5); }
+[class~="bg-orange-500/30"] { background-color: rgba(249, 115, 22, 0.3); }
+[class~="bg-orange-300/20"] { background-color: rgba(253, 186, 116, 0.2); }
+[class~="bg-emerald-600/30"] { background-color: rgba(5, 150, 105, 0.3); }
+[class~="bg-emerald-700/30"] { background-color: rgba(4, 120, 87, 0.3); }
+[class~="bg-emerald-700/80"] { background-color: rgba(4, 120, 87, 0.8); }
+[class~="bg-blue-700/50"] { background-color: rgba(29, 78, 216, 0.5); }
+[class~="bg-sky-700/70"] { background-color: rgba(3, 105, 161, 0.7); }
+[class~="bg-rose-600/50"] { background-color: rgba(225, 29, 72, 0.5); }
+[class~="bg-rose-700/70"] { background-color: rgba(190, 18, 60, 0.7); }
+[class~="bg-yellow-900/40"] { background-color: rgba(113, 63, 18, 0.4); }
+[class~="bg-transparent"] { background-color: transparent; }
+
+[class~="bg-gradient-to-r"] { background-image: linear-gradient(to right, var(--tw-gradient-stops)); }
+[class~="bg-gradient-to-br"] { background-image: linear-gradient(to bottom right, var(--tw-gradient-stops)); }
+[class~="from-purple-600"] { --tw-gradient-from: #9333ea; --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, rgba(147, 51, 234, 0)); }
+[class~="from-green-600"] { --tw-gradient-from: #16a34a; --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, rgba(22, 163, 74, 0)); }
+[class~="from-red-600"] { --tw-gradient-from: #dc2626; --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, rgba(220, 38, 38, 0)); }
+[class~="from-indigo-600"] { --tw-gradient-from: #4f46e5; --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, rgba(79, 70, 229, 0)); }
+[class~="from-pink-500"] { --tw-gradient-from: #ec4899; --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, rgba(236, 72, 153, 0)); }
+[class~="from-amber-600"] { --tw-gradient-from: #d97706; --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, rgba(217, 119, 6, 0)); }
+[class~="to-pink-600"] { --tw-gradient-to: #db2777; }
+[class~="to-emerald-500"] { --tw-gradient-to: #10b981; }
+[class~="to-orange-500"] { --tw-gradient-to: #f97316; }
+[class~="to-purple-600"] { --tw-gradient-to: #9333ea; }
+
+[class~="border"] { border-width: 1px; border-style: solid; }
+[class~="border-b"] { border-bottom-width: 1px; border-bottom-style: solid; }
+[class~="border-t"] { border-top-width: 1px; border-top-style: solid; }
+[class~="border-l-2"] { border-left-width: 2px; border-left-style: solid; }
+[class~="border-white/5"] { border-color: rgba(255, 255, 255, 0.05); }
+[class~="border-white/10"] { border-color: rgba(255, 255, 255, 0.1); }
+[class~="border-white/15"] { border-color: rgba(255, 255, 255, 0.15); }
+[class~="border-white/20"] { border-color: rgba(255, 255, 255, 0.2); }
+[class~="border-purple-500/30"] { border-color: rgba(168, 85, 247, 0.3); }
+[class~="border-purple-500/40"] { border-color: rgba(168, 85, 247, 0.4); }
+[class~="border-green-500/40"] { border-color: rgba(34, 197, 94, 0.4); }
+[class~="border-yellow-700/40"] { border-color: rgba(161, 98, 7, 0.4); }
+[class~="border-rose-500/60"] { border-color: rgba(244, 63, 94, 0.6); }
+
+[class~="rounded"] { border-radius: 0.25rem; }
+[class~="rounded-lg"] { border-radius: 0.5rem; }
+[class~="rounded-xl"] { border-radius: 0.75rem; }
+[class~="rounded-2xl"] { border-radius: 1rem; }
+[class~="rounded-3xl"] { border-radius: 1.5rem; }
+[class~="rounded-full"] { border-radius: 9999px; }
+[class~="rounded-t-lg"] { border-top-left-radius: 0.5rem; border-top-right-radius: 0.5rem; }
+
+[class~="shadow-xl"] { box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.25), 0 10px 10px -5px rgba(0, 0, 0, 0.1); }
+
+[class~="relative"] { position: relative; }
+[class~="absolute"] { position: absolute; }
+[class~="fixed"] { position: fixed; }
+[class~="sticky"] { position: sticky; }
+[class~="inset-0"] { top: 0; right: 0; bottom: 0; left: 0; }
+[class~="top-0"] { top: 0; }
+[class~="right-6"] { right: 1.5rem; }
+[class~="bottom-6"] { bottom: 1.5rem; }
+[class~="z-10"] { z-index: 10; }
+[class~="z-50"] { z-index: 50; }
+
+[class~="overflow-hidden"] { overflow: hidden; }
+[class~="overflow-auto"] { overflow: auto; }
+[class~="overflow-x-auto"] { overflow-x: auto; }
+[class~="overflow-y-auto"] { overflow-y: auto; }
+
+[class~="transition"] { transition: all 0.15s ease; }
+[class~="transition-all"] { transition: all 0.2s ease; }
+[class~="animate-pulse"] { animation: tw-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+
+[class~="cursor-pointer"] { cursor: pointer; }
+[class~="focus:outline-none"]:focus { outline: none; }
+[class~="focus:border-purple-400"]:focus { border-color: #c084fc; }
+[class~="focus:ring-1"]:focus { box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.15); }
+[class~="focus:ring-sky-500/50"]:focus { box-shadow: 0 0 0 1px rgba(14, 165, 233, 0.5); }
+
+[class~="hover:bg-white/10"]:hover { background-color: rgba(255, 255, 255, 0.1); }
+[class~="hover:bg-white/20"]:hover { background-color: rgba(255, 255, 255, 0.2); }
+[class~="hover:bg-white/[.03]"]:hover { background-color: rgba(255, 255, 255, 0.03); }
+[class~="hover:bg-purple-500"]:hover { background-color: #a855f7; }
+[class~="hover:bg-purple-600"]:hover { background-color: #9333ea; }
+[class~="hover:bg-purple-600/60"]:hover { background-color: rgba(147, 51, 234, 0.6); }
+[class~="hover:bg-purple-600/70"]:hover { background-color: rgba(147, 51, 234, 0.7); }
+[class~="hover:bg-blue-700"]:hover { background-color: #1d4ed8; }
+[class~="hover:bg-green-700"]:hover { background-color: #15803d; }
+[class~="hover:bg-indigo-600/70"]:hover { background-color: rgba(79, 70, 229, 0.7); }
+[class~="hover:bg-red-600/50"]:hover { background-color: rgba(220, 38, 38, 0.5); }
+[class~="hover:bg-emerald-600/40"]:hover { background-color: rgba(5, 150, 105, 0.4); }
+[class~="hover:bg-emerald-600/50"]:hover { background-color: rgba(5, 150, 105, 0.5); }
+[class~="hover:opacity-90"]:hover { opacity: 0.9; }
+[class~="hover:text-white"]:hover { color: #ffffff; }
+[class~="hover:text-gray-300"]:hover { color: #d1d5db; }
+[class~="hover:text-blue-200"]:hover { color: #bfdbfe; }
+
+[class~="placeholder-gray-400"]::placeholder { color: #9ca3af; }
+[class~="placeholder-gray-500"]::placeholder { color: #6b7280; }
+
+@keyframes tw-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
