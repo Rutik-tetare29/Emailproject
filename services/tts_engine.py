@@ -22,6 +22,27 @@ logger = logging.getLogger(__name__)
 _TTS_CHUNK_CHARS = 180
 
 
+def _speak_with_gtts(text: str, out_path: str = None) -> str:
+    """
+    Cloud-friendly fallback TTS using gTTS.
+    Returns MP3 path or empty string on failure.
+    """
+    try:
+        from gtts import gTTS  # type: ignore
+        if out_path is None:
+            out_path = os.path.join(Config.UPLOAD_FOLDER, f"tts_{uuid.uuid4().hex}.mp3")
+        elif out_path.lower().endswith(".wav"):
+            out_path = out_path[:-4] + ".mp3"
+
+        tts = gTTS(text=text, lang="en", slow=False)
+        tts.save(out_path)
+        logger.info("gTTS fallback saved to %s", out_path)
+        return out_path
+    except Exception as exc:
+        logger.error("gTTS fallback error: %s", exc)
+        return ""
+
+
 def _split_sentences(text: str) -> list[str]:
     """
     Split text at sentence boundaries, keeping each chunk ≤ _TTS_CHUNK_CHARS.
@@ -152,8 +173,8 @@ def speak_to_file(text: str, out_path: str = None) -> str:
                     wav_params = params
 
         if not all_pcm or not wav_params:
-            logger.error("TTS produced no audio data")
-            return ""
+            logger.error("TTS produced no audio data; falling back to gTTS")
+            return _speak_with_gtts(text, out_path)
 
         _write_wav(
             out_path, all_pcm,
@@ -166,7 +187,7 @@ def speak_to_file(text: str, out_path: str = None) -> str:
 
     except Exception as exc:
         logger.error("TTS error: %s", exc)
-        return ""
+        return _speak_with_gtts(text, out_path)
 
     finally:
         for tp in tmp_paths:

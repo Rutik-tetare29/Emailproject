@@ -357,8 +357,8 @@ async function processAndSend(buffers) {
       // playTTS → onended already calls _autoRestart, so we're covered
       playTTS(data.audio_url);
     } else {
-      // No TTS for this response (pyttsx3 failed, or TTS skipped) — restart anyway
-      _autoRestart(600);
+      // Server TTS unavailable on some deployments; use browser fallback.
+      _speakBrowserFallback(data.response_text || '');
     }
 
   } catch (err) {
@@ -500,6 +500,39 @@ function _startSpeechWatcher() {
 
 function _stopSpeechWatcher() {
   if (_wsRecog) { try { _wsRecog.stop(); } catch (_) {} _wsRecog = null; }
+}
+
+// Browser TTS fallback for environments where server TTS cannot render audio.
+function _speakBrowserFallback(text) {
+  if (!text || !window.speechSynthesis) {
+    _autoRestart(500);
+    return;
+  }
+
+  try { window.speechSynthesis.cancel(); } catch (_) {}
+
+  const utt = new SpeechSynthesisUtterance(text);
+  const langMap = {
+    en: 'en-US', hi: 'hi-IN', mr: 'mr-IN', es: 'es-ES', fr: 'fr-FR',
+    de: 'de-DE', it: 'it-IT', pt: 'pt-PT', ja: 'ja-JP', zh: 'zh-CN'
+  };
+  utt.lang = langMap[_voiceLang] || 'en-US';
+  utt.rate = 1.0;
+  utt.pitch = 1.0;
+
+  _setSpeakingUI(true);
+  utt.onend = () => {
+    _setSpeakingUI(false);
+    setStatus('Listening...', 'idle');
+    _autoRestart(500);
+  };
+  utt.onerror = () => {
+    _setSpeakingUI(false);
+    setStatus('Listening...', 'idle');
+    _autoRestart(500);
+  };
+
+  window.speechSynthesis.speak(utt);
 }
 
 // ── TTS playback ──────────────────────────────────────────────────────────────
@@ -744,7 +777,7 @@ async function submitMsgTypeIn() {
     const statusMsg = _msgStep ? (msgStepLabels[_msgStep] || _msgStep) : ('Done \u2022 send_message');
     setStatus(statusMsg, _msgStep ? 'recording' : 'done');
     if (data.audio_url) playTTS(data.audio_url);
-    else _autoRestart(600);
+    else _speakBrowserFallback(data.response_text || '');
   } catch (err) {
     setStatus('Network error: ' + err.message, 'error');
     _autoRestart(1500);
@@ -789,7 +822,7 @@ function _handleComposeResponse(data) {
   if (data.audio_url) {
     playTTS(data.audio_url);
   } else {
-    _autoRestart(600);
+    _speakBrowserFallback(data.response_text || '');
   }
 }
 
