@@ -82,8 +82,7 @@ class Config:
     # Google Cloud Console -> APIs & Services -> Credentials -> Authorised redirect URIs
     GOOGLE_REDIRECT_URI = os.getenv(
         "GOOGLE_REDIRECT_URI",
-        "http://127.0.0.1:5000/login/google/callback",
-        "https://emailproject--rutiktetare.replit.app/login/google/callback",
+        "https://emailproject--rutiktetare.replit.app/login/google/callback"
     )
 
     # Gmail IMAP / SMTP (App Password flow)
